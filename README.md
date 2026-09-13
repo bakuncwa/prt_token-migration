@@ -13,6 +13,9 @@ This repo holds two things side by side:
   pipeline, built to onboard any merchant's token migration without touching the
   pipeline code itself. See [Modular version](#modular-version) below.
 
+New to either pipeline? **[`SETUP.md`](SETUP.md)** covers authentication, required IAM
+roles, and the `gcloud` commands to deploy and debug both.
+
 ## Architecture (original pipeline)
 
 ![Token Migration ETL diagram](DigitalOcean%20Card%20Token%20Migration%20ETL%20%282%29.png)
@@ -164,6 +167,37 @@ see [`modular/open_decisions.py`](modular/open_decisions.py). As of this write-u
 3. `run_transform()` and `run_reconcile()` run end to end against a separate test
    bucket (`cardcorp-token-migration-modular-test`), seeded from the same source data
    the original pipeline uses, for direct comparison.
+
+## Cost: low-cost (original) vs. high-cost (modular) path
+
+For a business weighing whether to adopt the modular version merchant-by-merchant:
+the pluggable design in `modular/` means cost scales with which adapters a merchant
+actually opts into, not with the codebase itself. Every merchant on the default path
+(Cloud Run puller, Firestore, no Dataflow, no SQL) costs about the same as the
+original pipeline does today; Dataflow and Cloud SQL are the two line items that turn
+"a few dollars" into a real recurring bill, and both are opt-in per merchant, not
+pipeline-wide.
+
+| Cost driver | Original (CardCorp only) | Modular -- low cost (Firestore + Cloud Run puller, default path) | Modular -- high cost (+ Dataflow, + Cloud SQL, opted in) |
+|---|---|---|---|
+| Compute (Cloud Run functions) | Within Always Free tier (2M invocations, 400K GB-s/mo) at this volume | Same free tier, shared across merchants -- still ~\$0 through dozens of low-volume merchants | Same |
+| Extraction | Cloud Run puller, included above | Cloud Run puller, included above | + Dataflow: no free tier -- roughly \$0.05-\$0.30 per batch run (worker warm-up + vCPU/memory-hour), scaling with run frequency and volume |
+| Reconciliation store | Firestore Always Free tier (1 GiB, 50K reads/20K writes per day) -- \$0 at 2,275 records | Same, per merchant -- likely still \$0 through moderate merchant counts | + Cloud SQL: no meaningful free tier -- smallest always-on tier runs roughly \$7-\$15/month **per instance**, the single biggest fixed-cost driver here |
+| Mapping authoring | Manual, developer time only | Gemini agent (flash-tier model): a few thousand tokens per onboarding call -- a fraction of a cent, run rarely (once per merchant onboarding) | Same |
+| CI/CD | Manual `gcloud functions deploy` | Cloud Build, within the 120 build-minute/day free tier at this deploy frequency | Same |
+| Storage (GCS) | Pennies/month (a few MB of CSVs) | Pennies/month, scales linearly with merchant count | Same |
+| **Estimated monthly total** | **~\$0** | **~\$0-few dollars**, dominated by whichever merchant crosses a free-tier threshold first | **~\$10-100+/month**, driven almost entirely by how many merchants opt into Cloud SQL and how often Dataflow jobs run |
+
+**Recommendation for adoption:** default every new merchant to the low-cost path; only
+approve Dataflow or Cloud SQL for a specific merchant when their volume or downstream
+reporting genuinely requires it (same reasoning as `modular/DESIGN.md`'s verdicts).
+That keeps the marginal cost of onboarding merchant *N+1* close to zero until one
+specifically needs the expensive adapters.
+
+> Figures above are illustrative, based on published GCP list pricing at time of
+> writing, not a quote -- actual costs depend on region, committed-use discounts, and
+> real traffic. Run the [GCP Pricing Calculator](https://cloud.google.com/products/calculator)
+> against real projected volumes before committing budget.
 
 ## Key Technical Contributions & Impact
 
