@@ -1,0 +1,44 @@
+{
+  "merchant": "cardcorp",
+  "description": "CardCorp -> Revolut Bank acquirer migration. Ported 1:1 from original/column_mapping.py to prove the generalized loader reproduces the live pipeline's behavior before any other merchant is onboarded.",
+  "reconciled_by": {
+    "id_column": "card.id",
+    "fields": ["card.number"]
+  },
+  "collection_prefix": "cardholders",
+  "store": {
+    "type": "firestore",
+    "database": "(default)"
+  },
+  "extraction_adapter": "cloud_run_puller",
+  "sink_adapter": "digitalocean_kubernetes",
+  "columns": {
+    "renames": {
+      "CustomerName": "name",
+      "RegistrationId": "id",
+      "City": "card.address_city",
+      "OPP_card.country": "card.address_country",
+      "OPP_billing.street1": "card.address_line1",
+      "State": "card.address_state",
+      "Zip": "card.address_zip"
+    },
+    "expansions": {
+      "UniqueId": {
+        "type": "copy_then_blank",
+        "targets": ["card.id", "card.transaction_ids", "card.number"]
+      },
+      "Expiry": {
+        "type": "split_date",
+        "source_format": "YYYY-MM",
+        "targets": ["card.exp_year", "card.exp_month"]
+      }
+    },
+    "repairs": {
+      "AccountNumberLast4": {
+        "type": "zero_pad_if_length",
+        "length": 3,
+        "target_length": 4
+      }
+    }
+  }
+}
