@@ -3,6 +3,9 @@
 *.xlsx
 CardCorp_RG_CITid_Completed/
 
+# Exception: synthetic, non-real test fixture data, safe to commit
+!production/sample_data/*.csv
+
 # Credentials
 *.local.txt
 db_password.local.txt

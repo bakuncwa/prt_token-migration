@@ -142,7 +142,7 @@ gcloud functions deploy sync-paas-reconciled-to-digitalocean \
 ## 6. Deploy: production pipeline
 
 **Gotcha:** the Python Cloud Functions buildpack requires the entry-point file to be
-literally named `main.py` at the source root -- `staging_service.py` doesn't satisfy
+literally named `main.py` at the source root -- `staging_service.py` does not satisfy
 that as-is. Stage a small deploy directory with a one-line `main.py` that re-exports
 the real entry points, rather than renaming the actual source file:
 
@@ -170,9 +170,9 @@ gcloud functions deploy staging-on-firestore-write \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-**Onboarding a new merchant** doesn't need a redeploy at all -- drop a new
+**Onboarding a new merchant** does not need a redeploy at all -- drop a new
 `production/configs/<MERCHANT_ID>.json` (see `production/configs/cardcorp.json` for the
-shape) and it's picked up on the next invocation, since the config is read fresh
+shape) and is picked up on the next invocation, since the config is read fresh
 from disk each time rather than baked into the deployed image at build time.
 
 ## 7. Run manually / locally

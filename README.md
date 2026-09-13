@@ -3,18 +3,28 @@
 A PCI-scoped ETL pipeline that migrates card-on-file data from a DigitalOcean-hosted
 MIT (Merchant-Initiated Transaction) database into a new token vault, using Google
 Cloud Storage as staging and Firestore as a narrow, single-purpose reconciliation
-layer for the one field that can't be automated: the new card number (PAN).
+layer for the one field that cannot be automated: the new card number (PAN).
 
-This repo holds two things side by side:
+## Contents
 
 - **[`live/`](live/)** -- the live, single-merchant pipeline built for CardCorp's
   migration to the Revolut Bank acquirer gateway. Deployed and running today.
-- **[`production/`](production/)** -- the generalized, config-driven version of the same
-  pipeline, built to onboard any merchant's token migration without touching the
-  pipeline code itself. See [Production version](#production-version) below.
-
-New to either pipeline? **[`SETUP.md`](SETUP.md)** covers authentication, required IAM
-roles, and the `gcloud` commands to deploy and debug both.
+- **[`production/`](production/)** -- the generalized, config-driven version of the
+  same pipeline, built to onboard any merchant's token migration without modifying
+  the pipeline code. See [Production version](#production-version).
+- **[`SETUP.md`](SETUP.md)** -- setup and deployment reference: authentication,
+  required IAM roles, environment variables, and the exact `gcloud` commands to
+  deploy and debug both pipelines.
+- [Architecture (live pipeline)](#architecture-live-pipeline)
+- [Firestore scope: why only `card.number`](#firestore-scope-why-only-cardnumber)
+- [Pipeline stages (live)](#pipeline-stages-live)
+- [Column mapping (live)](#column-mapping-live)
+- [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
+- [Production version](#production-version)
+- [Cost comparison](#cost-comparison)
+- [Key Technical Contributions & Impact](#key-technical-contributions--impact)
+- [Local development](#local-development)
+- [Data handling](#data-handling)
 
 ## Architecture (live pipeline)
 
@@ -35,23 +45,23 @@ DigitalOcean MIT DB --{GET}--> GCS raw/ --transform--> GCS transformed/
                                               DigitalOcean MIT DB <--{POST}--
 ```
 
-Every stage after the initial extract is event-driven: uploading a file to the right
-GCS prefix, or writing/exporting a Firestore document, is enough to trigger the next
-step automatically via Cloud Run functions (Eventarc). Nothing needs to be run by
-hand except entering the reconciled card number itself.
+Every stage after the initial extract is event-driven: uploading a file to the
+correct GCS prefix, or writing or exporting a Firestore document, triggers the next
+step automatically through Cloud Run functions (Eventarc). No stage requires manual
+execution except entering the reconciled card number itself.
 
-## Why Firestore, and why only `card.number`
+## Firestore scope: why only `card.number`
 
-The automated transform (raw CSV → transformed CSV) can populate every column in the
-new schema except the new card number -- that field is genuinely blank in the source
-data and has to be entered by a person. Rather than exposing the full cardholder
-record for that manual step, Firestore stores **only** `{"card_number": ...}`, keyed
-by `card.id`. There is no other PII or PAN data in Firestore at any point, so there's
-nothing else for a reviewer to see or accidentally change -- no read-only lock or
-Security Rule is needed to protect fields that were never written there in the first
-place. The full reconciled record (all transformed columns + whatever `card.number`
-Firestore currently holds) is only ever reassembled at export time, by reading the
-transformed CSV fresh from GCS and overlaying Firestore's value per `card.id`.
+The automated transform (raw CSV to transformed CSV) populates every column in the
+new schema except the new card number: that field is genuinely blank in the source
+data and must be entered by a person. Rather than exposing the full cardholder record
+for that manual step, Firestore stores **only** `{"card_number": ...}`, keyed by
+`card.id`. Firestore holds no other PII or PAN data at any point, so there is nothing
+else for a reviewer to see or modify -- no read-only lock or Security Rule is
+required to protect fields that were never written there. The full reconciled record
+(every transformed column plus whatever `card.number` Firestore currently holds) is
+reassembled only at export time, by reading the transformed CSV fresh from GCS and
+overlaying Firestore's value per `card.id`.
 
 ## Pipeline stages (live)
 
@@ -65,20 +75,21 @@ transformed CSV fresh from GCS and overlaying Firestore's value per `card.id`.
 | 6 | Sync back | `live/deploy_digitalocean.py` | GCS finalize on `cleaned/*.csv` | `cleaned/*.csv` | DigitalOcean MIT DB (via Kubernetes API) |
 
 Stage 1 (`extract_digitalocean.py`) and the DigitalOcean-write leg of stage 6
-(`push_records_to_digitalocean()` in `deploy_digitalocean.py`) are templates only --
-no live DigitalOcean API write/read credentials are provisioned in this environment
-yet, so those two legs document the intended request shape and raise clearly instead
-of guessing at an endpoint.
+(`push_records_to_digitalocean()` in `deploy_digitalocean.py`) are templates only:
+no live DigitalOcean API write or read credentials are provisioned in this
+environment, so both legs document the intended request shape and raise explicitly
+rather than assuming an endpoint.
 
 Each month's dataset gets its own dated Firestore collection (`MMYYYY_cardholders`,
-e.g. `052025_cardholders`), derived from the filename via `collection_naming.py`, so
-re-processing an old month never collides with the current one.
+for example `052025_cardholders`), derived from the filename by
+`collection_naming.py`, so reprocessing an earlier month does not collide with the
+current one.
 
 ## Column mapping (live)
 
-Renames/splits applied by `live/column_mapping.py` (source of truth:
+Renames and splits applied by `live/column_mapping.py` (source of truth:
 `Data Transformation_TokenMigration.xlsx`); every other raw column is preserved
-as-is.
+unchanged.
 
 | Raw column | Transformed column |
 |---|---|
@@ -94,8 +105,8 @@ as-is.
 | `Zip` | `card.address_zip` |
 
 `card.transaction_ids` and `card.number` are emitted blank at transform time (no
-source mapping exists for them) rather than fabricated. `card.number` is filled in
-later, exclusively via the Firestore reconciliation step above.
+source mapping exists for them) rather than fabricated. `card.number` is populated
+later, exclusively through the Firestore reconciliation step described above.
 
 ## Deployed Cloud Run functions (live)
 
@@ -111,93 +122,122 @@ All deployed as Cloud Run functions (Gen2 Cloud Functions), project
 | `sync-paas-reconciled-to-digitalocean` | `on_paas_reconciled` | GCS finalize, bucket-wide (watches `cleaned/*.csv`) |
 
 Each function's exact `gcloud functions deploy` command is documented in its own
-script's module docstring.
+script's module docstring; a placeholder-driven, deployment-agnostic version of the
+same commands is in [`SETUP.md`](SETUP.md).
 
 ## Production version
 
-`production/` generalizes the pipeline above into a config-driven "token migration as a
-service": the same read → transform → reconcile → write shape, but which merchant,
-which mapping rules, which extraction source, and which sink system are all
-configuration, not code.
+`production/` generalizes the pipeline above into a config-driven "token migration as
+a service": the same read, transform, reconcile, write shape, but the merchant, the
+mapping rules, the extraction source, and the sink system are all configuration, not
+code.
 
 ![Production Token Migration ETL diagram](Production%20Token%20Migration%20ETL.png)
 
-**What stays the same:** the staging logic itself -- read a source, apply a mapping,
-write a destination -- is the identical shape as `live/column_mapping.py` and
+**What stays identical:** the staging logic itself -- read a source, apply a
+mapping, write a destination -- is the same shape as `live/column_mapping.py` and
 `live/export_firestore_to_gcs.py`'s merge step, now driven by
-`production/configs/<merchant>.json` instead of hardcoded rename dicts. Firestore's role
-is unchanged too: still exactly one field, still edited through its own Console, now
-namespaced by merchant as well as by month (`<merchant>_MMYYYY_cardholders`).
+`production/configs/<merchant>.json` instead of hardcoded rename dictionaries.
+Firestore's role is unchanged: still exactly one field, still edited through its own
+Console, now namespaced by merchant as well as by month
+(`<merchant>_MMYYYY_cardholders`).
 
-**What's pluggable, per merchant:**
+**What is pluggable, per merchant:**
 
 | Piece | Default | Opt-in alternative |
 |---|---|---|
-| Extraction | scheduled Cloud Run puller | Dataflow (for merchants whose volume needs it) |
+| Extraction | scheduled Cloud Run puller | Dataflow (for merchants whose volume requires it) |
 | Mapping authoring | Gemini agent proposes `configs/<merchant>.json` from sample data, human approves | -- |
-| Reconciliation store | Firestore, one field per document | SQL (for merchants needing joins/reporting) |
-| Sink | pluggable adapter, e.g. DigitalOcean Kubernetes for Payreto | any merchant's own target system |
+| Reconciliation store | Firestore, one field per document | SQL (for merchants requiring joins or reporting) |
+| Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto | any merchant's own target system |
 
-Full reasoning behind each of those defaults: [`production/DESIGN.md`](production/DESIGN.md).
+Full reasoning behind each default: [`production/DESIGN.md`](production/DESIGN.md).
 
-**What's still a placeholder, on purpose, tracked as data rather than left implicit:**
-see [`production/open_decisions.py`](production/open_decisions.py). As of this write-up:
+**What remains a placeholder, by design, tracked as data rather than left implicit:**
+see [`production/open_decisions.py`](production/open_decisions.py). As of this
+write-up:
 
-- **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py` proposes a
-  mapping config but deliberately refuses to write it anywhere until a review gate
-  exists; it currently raises rather than silently trusting an unreviewed proposal.
+- **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py`
+  proposes a mapping config but deliberately refuses to write it anywhere until a
+  review gate exists; it raises rather than trusting an unreviewed proposal.
 - **DigitalOcean access for Payreto** -- unresolved. Both `live/`'s and
-  `production/`'s DigitalOcean legs (extraction and sink) are placeholders; nothing on
-  the GCS/Firestore side of either pipeline is blocked by this.
+  `production/`'s DigitalOcean legs (extraction and sink) are placeholders; neither
+  pipeline's GCS/Firestore side is blocked by this.
 - **Test strategy** -- resolved. See below.
 
-### What's been tested
+### What has been tested
 
-`production/test_staging_service.py` runs against live GCP data, not mocks:
+`production/test_staging_service.py` runs four checks, two of them independent of
+any cloud credential:
 
-1. `production/staging_service.py`'s config-driven `transform_dataframe()` reproduces
-   `live/column_mapping.py`'s hardcoded `transform_dataframe()` byte-for-byte, on
-   the real CardCorp `raw/January 2026.csv`.
-2. Its `reconcile_dataframe()` reproduces `live/export_firestore_to_gcs.py`'s
+1. `production/staging_service.py`'s config-driven `transform_dataframe()`
+   reproduces `live/column_mapping.py`'s hardcoded `transform_dataframe()`
+   byte-for-byte, on the real CardCorp `raw/January 2026.csv`. Requires live GCP
+   credentials.
+2. `transform_dataframe()` against `production/configs/samplepay.json`: a synthetic
+   merchant with a structurally different schema from CardCorp's -- different column
+   names, a different `Expiry` date format (`MM/YYYY` instead of CardCorp's
+   `YYYY-MM`), and a different zero-padding repair length. Runs entirely locally
+   against `production/sample_data/samplepay_raw.csv`, with no cloud dependency.
+   This check caught a real defect before it shipped: `_split_date()` declared
+   `source_format` in the config schema but ignored it, hardcoded to CardCorp's
+   date shape. Fixed in `staging_service.py`; the function now parses per the
+   declared format.
+3. `reconcile_dataframe()` reproduces `live/export_firestore_to_gcs.py`'s
    `merge_card_numbers()` byte-for-byte, reading the real, live
-   `012026_cardholders` Firestore collection -- proving that when a card number is
-   reconciled in Firestore, the production staging layer's transformation still works,
-   running through the generalized Cloud Run script rather than the
-   CardCorp-only live pipeline.
-3. `run_transform()` and `run_reconcile()` run end to end against a separate test
-   bucket (`cardcorp-token-migration-production-test`), seeded from the same source data
-   the live pipeline uses, for direct comparison.
+   `012026_cardholders` Firestore collection -- confirming that when a card number
+   is reconciled in Firestore, the production staging layer's transformation still
+   works, running through the generalized Cloud Run script rather than the
+   CardCorp-only live pipeline. Requires live GCP credentials.
+4. `run_transform()` and `run_reconcile()` run end to end against a separate test
+   bucket (`cardcorp-token-migration-production-test`), seeded from the same source
+   data the live pipeline uses, for direct comparison. Requires live GCP
+   credentials.
 
-## Cost: low-cost (live) vs. high-cost (production) path
+## Cost comparison
 
-For a business weighing whether to adopt the production version merchant-by-merchant:
-the pluggable design in `production/` means cost scales with which adapters a merchant
-actually opts into, not with the codebase itself. Every merchant on the default path
-(Cloud Run puller, Firestore, no Dataflow, no SQL) costs about the same as the
-live pipeline does today; Dataflow and Cloud SQL are the two line items that turn
-"a few dollars" into a real recurring bill, and both are opt-in per merchant, not
-pipeline-wide.
+For a business weighing whether to adopt the production version merchant by
+merchant: the pluggable design in `production/` means cost scales with which
+adapters a merchant opts into, not with the codebase itself. Every merchant on the
+default path (Cloud Run puller, Firestore, no Dataflow, no SQL) costs approximately
+the same as the live pipeline does today. Dataflow and Cloud SQL are the two line
+items that shift a near-zero bill into a recurring monthly cost, and both are
+opt-in per merchant, not pipeline-wide.
 
-| Cost driver | Live (CardCorp only) | Production -- low cost (Firestore + Cloud Run puller, default path) | Production -- high cost (+ Dataflow, + Cloud SQL, opted in) |
+The live pipeline's actual measured volume -- 2,275 records across 16 monthly
+Firestore collections, a few dozen function invocations per month, well under
+100 MB of total CSV storage -- is used below as the baseline, rather than an assumed
+volume.
+
+| Cost driver | Live (CardCorp, measured) | Production, default path (per merchant, same volume) | Production, opted into Dataflow + Cloud SQL (per merchant) |
 |---|---|---|---|
-| Compute (Cloud Run functions) | Within Always Free tier (2M invocations, 400K GB-s/mo) at this volume | Same free tier, shared across merchants -- still ~\$0 through dozens of low-volume merchants | Same |
-| Extraction | Cloud Run puller, included above | Cloud Run puller, included above | + Dataflow: no free tier -- roughly \$0.05-\$0.30 per batch run (worker warm-up + vCPU/memory-hour), scaling with run frequency and volume |
-| Reconciliation store | Firestore Always Free tier (1 GiB, 50K reads/20K writes per day) -- \$0 at 2,275 records | Same, per merchant -- likely still \$0 through moderate merchant counts | + Cloud SQL: no meaningful free tier -- smallest always-on tier runs roughly \$7-\$15/month **per instance**, the single biggest fixed-cost driver here |
-| Mapping authoring | Manual, developer time only | Gemini agent (flash-tier model): a few thousand tokens per onboarding call -- a fraction of a cent, run rarely (once per merchant onboarding) | Same |
-| CI/CD | Manual `gcloud functions deploy` | Cloud Build, within the 120 build-minute/day free tier at this deploy frequency | Same |
-| Storage (GCS) | Pennies/month (a few MB of CSVs) | Pennies/month, scales linearly with merchant count | Same |
-| **Estimated monthly total** | **~\$0** | **~\$0-few dollars**, dominated by whichever merchant crosses a free-tier threshold first | **~\$10-100+/month**, driven almost entirely by how many merchants opt into Cloud SQL and how often Dataflow jobs run |
+| Compute (Cloud Run functions) | \$0.00 -- a few dozen invocations/month against a free tier of 2,000,000 requests, 180,000 vCPU-seconds, and 360,000 GiB-seconds/month | \$0.00 -- free tier is project-wide, not per merchant; a few dozen invocations per merchant per month stays far under the shared limit through dozens of merchants | Same as default path |
+| Reconciliation store | \$0.00 -- 2,275 documents (tens of KB) against a daily free tier of 1 GiB stored, 50,000 reads, 20,000 writes, 20,000 deletes | \$0.00 at comparable per-merchant volume -- roughly 20+ merchants could each fully re-read their dataset on the same day before the shared daily read quota is touched | + Cloud SQL: no free tier. Smallest shared-core instance (`db-f1-micro`-equivalent) runs approximately \$7-\$10/month in compute alone, before storage, backup, and network -- a flat cost per opted-in merchant regardless of usage |
+| Extraction | included above | included above | + Dataflow: no free tier. One small worker (1 vCPU, 3.75 GiB) for a 10-minute monthly batch run costs roughly \$0.056/vCPU-hour x 0.167 hour + \$0.003557/GiB-hour x 3.75 GiB x 0.167 hour, approximately \$0.01-\$0.02 per run -- the compute itself is cheap; the cost is running and operating a second execution substrate at all |
+| Mapping authoring | manual, developer time only | Gemini agent, flash-tier pricing (\$0.30/1M input tokens, \$2.50/1M output tokens): a single onboarding call of roughly 5,000 input and 1,000 output tokens costs about \$0.004, run once per merchant onboarding | Same |
+| CI/CD | manual `gcloud functions deploy` | Cloud Build, within the 120 free build-minutes/day (e2-standard-2) at this deploy frequency | Same |
+| Storage (GCS) | approximately \$0.002/month (well under 100 MB at \$0.020/GB/month) | scales linearly with merchant count at the same per-merchant rate | Same |
+| **Estimated monthly total** | **approximately \$0.00** | **approximately \$0.00 per merchant**, until dozens of merchants are onboarded | **approximately \$7-\$10/month per merchant on Cloud SQL**, plus a few cents per merchant per month on Dataflow |
 
-**Recommendation for adoption:** default every new merchant to the low-cost path; only
-approve Dataflow or Cloud SQL for a specific merchant when their volume or downstream
-reporting genuinely requires it (same reasoning as `production/DESIGN.md`'s verdicts).
-That keeps the marginal cost of onboarding merchant *N+1* close to zero until one
-specifically needs the expensive adapters.
+**Recommendation for adoption:** default every new merchant to the low-cost path;
+approve Dataflow or Cloud SQL for a specific merchant only when volume or downstream
+reporting genuinely requires it, matching `production/DESIGN.md`'s verdicts. This
+keeps the marginal cost of onboarding merchant *N+1* close to zero unless that
+merchant specifically needs the higher-cost adapters.
 
-> Figures above are illustrative, based on published GCP list pricing at time of
-> writing, not a quote -- actual costs depend on region, committed-use discounts, and
-> real traffic. Run the [GCP Pricing Calculator](https://cloud.google.com/products/calculator)
-> against real projected volumes before committing budget.
+Figures above use published Google Cloud list pricing at time of writing, applied to
+this project's own measured usage, not a vendor quote. Actual costs depend on
+region, committed-use discounts, and real traffic; verify with the
+[GCP Pricing Calculator](https://cloud.google.com/products/calculator) before
+committing budget.
+
+Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
+[Firestore pricing](https://cloud.google.com/firestore/pricing),
+[Cloud Storage pricing](https://cloud.google.com/storage/pricing),
+[Dataflow pricing](https://cloud.google.com/dataflow/pricing),
+[Cloud SQL pricing](https://cloud.google.com/sql/pricing),
+[Cloud Build pricing](https://cloud.google.com/build/pricing),
+[Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ## Key Technical Contributions & Impact
 
@@ -208,7 +248,8 @@ specifically needs the expensive adapters.
   transfer client migrations to the Revolut Bank acquirer API gateway.
 - Generalized a single-merchant pipeline into a config-driven, multi-merchant
   "token migration as a service" architecture with pluggable extraction, staging,
-  and sink adapters, validated against the live pipeline's real production data.
+  and sink adapters, validated against both the live pipeline's real production
+  data and a structurally different synthetic merchant schema.
 
 | | |
 |---|---|
@@ -216,20 +257,24 @@ specifically needs the expensive adapters.
 | **16** | monthly cycles processed |
 | **0** | pipeline errors |
 | **1** | field ever touched by a human reviewer (`card.number`) |
+| **2** | merchant schemas validated against the production staging service |
 
 ## Local development
 
 Every Cloud Run function has a corresponding manual-run script (`main()`) for local
-testing without touching the deployed triggers -- see each file's module docstring
-for required/optional environment variables and usage. `live/test_transform_local.py`
-exercises the transform step against a local CSV with no cloud resources at all;
-`production/test_staging_service.py` is the production pipeline's equivalent, run against
-live data (see above).
+testing without touching the deployed triggers; see each file's module docstring for
+required and optional environment variables and usage. `live/test_transform_local.py`
+exercises the transform step against a local CSV with no cloud resources at all.
+`production/test_staging_service.py` is the production pipeline's equivalent;
+its second check (the `samplepay` schema) also requires no cloud resources, while
+its other three checks run against live data (see above).
 
 ## Data handling
 
 - All CSV I/O reads with `dtype=str, keep_default_na=False` throughout both
-  pipelines, to avoid pandas silently coercing types (e.g. a BIN becoming an int and
-  dropping leading zeros) or turning blank fields into `NaN`.
-- Sensitive data (raw/transformed/cleaned CSVs, spreadsheets, credentials) is
-  git-ignored and never committed -- see `.gitignore`.
+  pipelines, to prevent pandas from silently coercing types (for example, a BIN
+  becoming an integer and dropping leading zeros) or converting blank fields to
+  `NaN`.
+- Sensitive data (raw, transformed, and cleaned CSVs, spreadsheets, credentials) is
+  git-ignored and never committed; see `.gitignore`. The one exception is
+  `production/sample_data/`, which holds only synthetic, non-real test fixture data.

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import io
 import sys
+from datetime import datetime
 
 import functions_framework
 import pandas as pd
@@ -62,15 +63,35 @@ CLEANED_PREFIX = "cleaned/"
 # ---------------------------------------------------------------------------
 
 
-def _split_date(value: str) -> tuple[str, str]:
-    """Same "YYYY-MM" -> (year, zero-padded month) rule as the live
-    pipeline's _split_expiry(), generalized to any expansion the config
-    declares type "split_date" for."""
-    if isinstance(value, str) and len(value) == 7 and value[4] == "-":
-        year, month = value.split("-")
-        if year.isdigit() and month.isdigit():
-            return year, month.zfill(2)
-    return "", ""
+_DATE_FORMAT_MAP = {
+    "YYYY-MM": "%Y-%m",
+    "MM/YYYY": "%m/%Y",
+    "MM-YYYY": "%m-%Y",
+}
+
+
+def _split_date(value: str, source_format: str) -> tuple[str, str]:
+    """(year, zero-padded month) parsed per configs/<merchant>.json's
+    declared source_format -- generalizes the live pipeline's
+    _split_expiry(), which only ever had CardCorp's "YYYY-MM" to handle.
+    A second merchant's raw export using a different date shape (e.g.
+    "MM/YYYY") is exactly the case this was missed for until
+    test_staging_service.py's different-schema check caught it: the
+    config declared source_format, but this function ignored it and
+    silently returned blanks for any format other than "YYYY-MM"."""
+    strptime_format = _DATE_FORMAT_MAP.get(source_format)
+    if strptime_format is None:
+        raise SystemExit(
+            f"Unsupported split_date source_format {source_format!r}; "
+            f"add it to _DATE_FORMAT_MAP. Known formats: {sorted(_DATE_FORMAT_MAP)}"
+        )
+    if not isinstance(value, str):
+        return "", ""
+    try:
+        parsed = datetime.strptime(value, strptime_format)
+    except ValueError:
+        return "", ""
+    return f"{parsed.year:04d}", f"{parsed.month:02d}"
 
 
 def _zero_pad_if_length(value: str, length: int, target_length: int) -> str:
@@ -104,7 +125,8 @@ def transform_dataframe(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
                     out[target] = ""
             elif rule["type"] == "split_date":
                 year_col, month_col = rule["targets"]
-                split = series.map(_split_date)
+                source_format = rule["source_format"]
+                split = series.map(lambda v: _split_date(v, source_format))
                 out[year_col] = split.map(lambda t: t[0])
                 out[month_col] = split.map(lambda t: t[1])
             else:

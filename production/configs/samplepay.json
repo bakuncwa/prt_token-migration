@@ -1,0 +1,41 @@
+{
+  "merchant": "samplepay",
+  "description": "Synthetic sample merchant, not a real customer. Deliberately structured differently from configs/cardcorp.json -- different column names, a different Expiry date format (MM/YYYY vs. CardCorp's YYYY-MM), and a different repair field length -- to prove the staging service generalizes across schemas rather than only reproducing CardCorp's. See production/sample_data/samplepay_raw.csv and test_staging_service.py's test_transform_for_different_schema().",
+  "reconciled_by": {
+    "id_column": "card.id",
+    "fields": ["card.number"]
+  },
+  "collection_prefix": "accounts",
+  "store": {
+    "type": "firestore",
+    "database": "(default)"
+  },
+  "extraction_adapter": "cloud_run_puller",
+  "sink_adapter": "digitalocean_kubernetes",
+  "columns": {
+    "renames": {
+      "Holder_Name": "name",
+      "Contact_Email": "email",
+      "Account_Ref": "id",
+      "City_Name": "card.address_city"
+    },
+    "expansions": {
+      "Token_ID": {
+        "type": "copy_then_blank",
+        "targets": ["card.id", "card.transaction_ids", "card.number"]
+      },
+      "Valid_Thru": {
+        "type": "split_date",
+        "source_format": "MM/YYYY",
+        "targets": ["card.exp_year", "card.exp_month"]
+      }
+    },
+    "repairs": {
+      "Branch_Code": {
+        "type": "zero_pad_if_length",
+        "length": 5,
+        "target_length": 6
+      }
+    }
+  }
+}

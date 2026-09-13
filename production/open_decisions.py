@@ -33,13 +33,18 @@ OPEN_DECISIONS: list[dict] = [
             "data used by the live pipeline, for a side-by-side comparison."
         ),
         "resolution": (
-            "Resolved for initial validation: a separate bucket "
+            "Resolved for initial validation, two ways: (1) a separate bucket "
             "(cardcorp-token-migration-production-test), seeded from the same raw/ and "
             "transformed/ CardCorp CSVs already in the live pipeline's bucket, and "
-            "reconciled against the same live 012026_cardholders-equivalent Firestore "
-            "data. See production/test_staging_service.py and its run log. Still open: "
-            "whether a *production* deployment for a second merchant gets a bucket of "
-            "its own or a namespaced prefix in a shared bucket."
+            "reconciled against the same live Firestore data, proving the production "
+            "staging service reproduces the live pipeline exactly; (2) a synthetic "
+            "second merchant (configs/samplepay.json, sample_data/samplepay_raw.csv) "
+            "with a genuinely different schema -- different column names, a different "
+            "Expiry date format, a different repair field length -- run locally with no "
+            "cloud dependency, proving the staging service generalizes beyond CardCorp "
+            "rather than only reproducing it. See production/test_staging_service.py. "
+            "Still open: whether a *production* deployment for a second real merchant "
+            "gets a bucket of its own or a namespaced prefix in a shared bucket."
         ),
     },
     {
