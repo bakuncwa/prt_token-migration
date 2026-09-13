@@ -24,20 +24,20 @@ OPEN_DECISIONS: list[dict] = [
         "resolution": None,
     },
     {
-        "id": "modular_test_strategy",
+        "id": "production_test_strategy",
         "title": "Dry-run only vs. a separate seeded GCS bucket",
         "status": "resolved",
         "detail": (
-            "Whether the modular pipeline's first real test run is dry-run only, or "
+            "Whether the production pipeline's first real test run is dry-run only, or "
             "needs its own separate GCS bucket seeded from the same CardCorp source "
-            "data used by the original pipeline, for a side-by-side comparison."
+            "data used by the live pipeline, for a side-by-side comparison."
         ),
         "resolution": (
             "Resolved for initial validation: a separate bucket "
-            "(cardcorp-token-migration-modular-test), seeded from the same raw/ and "
-            "transformed/ CardCorp CSVs already in the original pipeline's bucket, and "
+            "(cardcorp-token-migration-production-test), seeded from the same raw/ and "
+            "transformed/ CardCorp CSVs already in the live pipeline's bucket, and "
             "reconciled against the same live 012026_cardholders-equivalent Firestore "
-            "data. See modular/test_staging_service.py and its run log. Still open: "
+            "data. See production/test_staging_service.py and its run log. Still open: "
             "whether a *production* deployment for a second merchant gets a bucket of "
             "its own or a namespaced prefix in a shared bucket."
         ),
@@ -47,8 +47,8 @@ OPEN_DECISIONS: list[dict] = [
         "title": "DigitalOcean Kubernetes API access for Payreto",
         "status": "unresolved",
         "detail": (
-            "Both the original pipeline's extract_digitalocean.py/deploy_digitalocean.py "
-            "and the modular pipeline's extraction_adapters.py/sink_adapters.py are "
+            "Both the live pipeline's extract_digitalocean.py/deploy_digitalocean.py "
+            "and the production pipeline's extraction_adapters.py/sink_adapters.py are "
             "placeholders on the DigitalOcean leg -- no live read or write credentials "
             "are configured in this environment. Nothing on the GCS/Firestore side of "
             "either pipeline is blocked by this; only the two ends that touch DigitalOcean are."

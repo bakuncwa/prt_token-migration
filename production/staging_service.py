@@ -1,23 +1,23 @@
-"""Modular Token Migration ETL: the one staging component, reused in both
+"""Production Token Migration ETL: the one staging component, reused in both
 directions, for any onboarded merchant.
 
-Generalizes two original-pipeline scripts into a single, config-driven
+Generalizes two live-pipeline scripts into a single, config-driven
 pair of functions:
-  - original/column_mapping.py's transform_dataframe() -> transform_dataframe()
+  - live/column_mapping.py's transform_dataframe() -> transform_dataframe()
     below, driven by configs/<merchant>.json instead of hardcoded
     SIMPLE_RENAMES/EXPANSIONS dicts.
-  - original/export_firestore_to_gcs.py's merge_card_numbers() ->
+  - live/export_firestore_to_gcs.py's merge_card_numbers() ->
     reconcile_dataframe() below, generalized from "always card.number
     keyed by card.id" to "whatever fields + id column
     configs/<merchant>.json declares under reconciled_by".
 
 Deployed as one Cloud Run service backing two Eventarc-triggered entry
 points (on_raw_uploaded, on_reconciliation_export) plus a manual main()
--- the same three-ways-to-run shape as the original pipeline's
+-- the same three-ways-to-run shape as the live pipeline's
 export_firestore_to_gcs.py, just no longer forked into a separate script
 per direction.
 
-Bucket layout is merchant-namespaced, one level deeper than the original
+Bucket layout is merchant-namespaced, one level deeper than the live
 pipeline's flat raw/, transformed/, cleaned/:
   raw/<merchant>/<Month Year>.csv
   transformed/<merchant>/Transformed_<Month>_<Year>.csv
@@ -63,7 +63,7 @@ CLEANED_PREFIX = "cleaned/"
 
 
 def _split_date(value: str) -> tuple[str, str]:
-    """Same "YYYY-MM" -> (year, zero-padded month) rule as the original
+    """Same "YYYY-MM" -> (year, zero-padded month) rule as the live
     pipeline's _split_expiry(), generalized to any expansion the config
     declares type "split_date" for."""
     if isinstance(value, str) and len(value) == 7 and value[4] == "-":
@@ -74,7 +74,7 @@ def _split_date(value: str) -> tuple[str, str]:
 
 
 def _zero_pad_if_length(value: str, length: int, target_length: int) -> str:
-    """Same leading-zero repair as the original pipeline's
+    """Same leading-zero repair as the live pipeline's
     _restore_account_number_last4_leading_zero(), generalized to any
     field/length the config declares under "repairs"."""
     if isinstance(value, str) and len(value) == length and value.isdigit():
@@ -85,7 +85,7 @@ def _zero_pad_if_length(value: str, length: int, target_length: int) -> str:
 def transform_dataframe(raw_df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """Apply configs/<merchant>.json's renames/expansions/repairs, in
     column order -- the declarative equivalent of
-    original/column_mapping.py's transform_dataframe(), for whichever
+    live/column_mapping.py's transform_dataframe(), for whichever
     merchant's config is passed in."""
     columns = config["columns"]
     renames = columns.get("renames", {})
@@ -135,12 +135,12 @@ def reconcile_dataframe(
     """Overlay each row's reconciled field(s) with the store's current
     value for that id, keeping every other column exactly as
     transform_dataframe() produced it -- the declarative equivalent of
-    original/export_firestore_to_gcs.py's merge_card_numbers(), for
+    live/export_firestore_to_gcs.py's merge_card_numbers(), for
     whichever id_column/fields configs/<merchant>.json declares under
     reconciled_by (CardCorp: id_column "card.id", one field
     "card.number"; a future merchant could reconcile more than one
     field the same way). An id with no matching store record keeps its
-    original (blank) transformed value, same fallback as the original."""
+    original (blank) transformed value, same fallback as the live pipeline."""
     reconciled_by = config["reconciled_by"]
     id_column = reconciled_by["id_column"]
     fields = reconciled_by["fields"]
@@ -157,7 +157,7 @@ def reconcile_dataframe(
 
 
 # ---------------------------------------------------------------------------
-# GCS I/O (unchanged shape from the original pipeline's download_csv/upload_csv)
+# GCS I/O (unchanged shape from the live pipeline's download_csv/upload_csv)
 # ---------------------------------------------------------------------------
 
 
@@ -203,7 +203,7 @@ def run_reconcile(
     cleaned/<merchant>/Reconciled_*.csv. reconciled_values is
     id -> {field: value}, already read by a store adapter (see
     store_adapters.py) -- this function has no store-specific code, same
-    separation the original pipeline kept between run_export() and
+    separation the live pipeline kept between run_export() and
     fetch_card_numbers()."""
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
@@ -219,7 +219,7 @@ def run_reconcile(
 
 
 def main() -> None:
-    """Manual/CLI run, mirroring the original pipeline's main() functions.
+    """Manual/CLI run, mirroring the live pipeline's main() functions.
 
     Usage:
       GCS_BUCKET=... MERCHANT=cardcorp RAW_BLOB_NAME="raw/cardcorp/May 2025.csv" \\
@@ -252,7 +252,7 @@ def main() -> None:
 
 @functions_framework.cloud_event
 def on_raw_uploaded(event: CloudEvent) -> None:
-    """Cloud Run function: GCS finalize trigger. Mirrors the original
+    """Cloud Run function: GCS finalize trigger. Mirrors the live
     pipeline's cf_transform_on_upload.py, generalized to read the
     merchant from the blob path (raw/<merchant>/<file>.csv) instead of
     assuming a single fixed merchant."""
@@ -276,7 +276,7 @@ def on_raw_uploaded(event: CloudEvent) -> None:
 @functions_framework.cloud_event
 def on_firestore_write(event: CloudEvent) -> None:
     """Cloud Run function: Firestore document-write trigger. Mirrors the
-    original pipeline's export_firestore_to_gcs.py:on_firestore_write --
+    live pipeline's export_firestore_to_gcs.py:on_firestore_write --
     re-reconciles that collection's dataset to cleaned/ the instant a
     reviewer's edit lands, generalized to any merchant/collection whose
     name matches <merchant>_MMYYYY_<prefix> (see merchant_config.py)."""

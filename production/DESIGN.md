@@ -1,4 +1,4 @@
-# Modular pipeline: design decisions
+# Production pipeline: design decisions
 
 Weighs a general-purpose "token migration as a service" pipeline against the
 CardCorp → Revolut Bank case it's generalized from. Full diagrams and reasoning:

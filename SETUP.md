@@ -1,6 +1,6 @@
 # Developer setup
 
-Getting either pipeline (`original/` or `modular/`) running from a clean machine:
+Getting either pipeline (`live/` or `production/`) running from a clean machine:
 authentication, required IAM roles, environment variables, and the exact `gcloud`
 commands to deploy and debug. Placeholders below (`<PROJECT_ID>`, `<BUCKET_NAME>`,
 etc.) stand in for real values -- this doc is meant to work for a new environment,
@@ -60,7 +60,7 @@ overrides it at deploy time):
 |---|---|
 | `roles/storage.objectAdmin` | read/write the staging bucket's objects |
 | `roles/datastore.user` | read/write Firestore documents |
-| `roles/datastore.viewer` | `original/export_firestore_to_gcs.py`'s `on_export_completed` looks up Firestore Admin API export operations (`datastore.operations.list`/`get`) to read which collection(s) a Console export was scoped to -- without this role that lookup fails closed and it falls back to exporting every dated collection |
+| `roles/datastore.viewer` | `live/export_firestore_to_gcs.py`'s `on_export_completed` looks up Firestore Admin API export operations (`datastore.operations.list`/`get`) to read which collection(s) a Console export was scoped to -- without this role that lookup fails closed and it falls back to exporting every dated collection |
 
 `roles/editor` on the project covers all of the above and is what CardCorp's actual
 deployment uses today -- fine for a single-project sandbox, more than a production
@@ -75,8 +75,8 @@ cd <REPO_DIRECTORY_NAME>
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r original/requirements.txt   # to work on the original pipeline
-pip install -r modular/requirements.txt    # to work on the modular pipeline
+pip install -r live/requirements.txt   # to work on the live pipeline
+pip install -r production/requirements.txt    # to work on the production pipeline
 ```
 
 ## 4. Environment variables
@@ -88,17 +88,17 @@ own docstring for the full, authoritative list. The common ones:
 |---|---|---|
 | `GCS_BUCKET` | both pipelines | `<BUCKET_NAME>` |
 | `FIRESTORE_DATABASE` | both pipelines | `(default)` |
-| `MERCHANT` | modular only | `<MERCHANT_ID>`, e.g. `cardcorp` |
+| `MERCHANT` | production only | `<MERCHANT_ID>`, e.g. `cardcorp` |
 | `TRANSFORMED_BLOB_NAME` | manual/CLI runs | `transformed/Transformed_<Month>_<Year>.csv` |
-| `RAW_BLOB_NAME` | manual/CLI runs | `raw/<Month Year>.csv` (original) / `raw/<MERCHANT_ID>/<Month Year>.csv` (modular) |
+| `RAW_BLOB_NAME` | manual/CLI runs | `raw/<Month Year>.csv` (live) / `raw/<MERCHANT_ID>/<Month Year>.csv` (production) |
 | `DIGITALOCEAN_TOKEN`, `DO_CLUSTER_NAME` | DigitalOcean legs (placeholders until access is granted) | -- |
 
-## 5. Deploy: original pipeline
+## 5. Deploy: live pipeline
 
-Five Cloud Run functions (Gen2), one per stage. Run each from `original/`:
+Five Cloud Run functions (Gen2), one per stage. Run each from `live/`:
 
 ```bash
-cd original
+cd live
 
 gcloud functions deploy transform-on-raw-upload \
   --gen2 --runtime=python312 --region=<REGION> \
@@ -139,7 +139,7 @@ gcloud functions deploy sync-paas-reconciled-to-digitalocean \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-## 6. Deploy: modular pipeline
+## 6. Deploy: production pipeline
 
 **Gotcha:** the Python Cloud Functions buildpack requires the entry-point file to be
 literally named `main.py` at the source root -- `staging_service.py` doesn't satisfy
@@ -148,9 +148,9 @@ the real entry points, rather than renaming the actual source file:
 
 ```bash
 STAGE=$(mktemp -d)
-cp modular/staging_service.py modular/merchant_config.py modular/store_adapters.py \
-   modular/requirements.txt "$STAGE/"
-cp -r modular/configs "$STAGE/"
+cp production/staging_service.py production/merchant_config.py production/store_adapters.py \
+   production/requirements.txt "$STAGE/"
+cp -r production/configs "$STAGE/"
 echo 'from staging_service import on_raw_uploaded, on_firestore_write  # noqa: F401' > "$STAGE/main.py"
 
 gcloud functions deploy staging-on-raw-upload \
@@ -171,28 +171,28 @@ gcloud functions deploy staging-on-firestore-write \
 ```
 
 **Onboarding a new merchant** doesn't need a redeploy at all -- drop a new
-`modular/configs/<MERCHANT_ID>.json` (see `modular/configs/cardcorp.json` for the
+`production/configs/<MERCHANT_ID>.json` (see `production/configs/cardcorp.json` for the
 shape) and it's picked up on the next invocation, since the config is read fresh
 from disk each time rather than baked into the deployed image at build time.
 
 ## 7. Run manually / locally
 
 ```bash
-# Original pipeline
-cd original
+# Live pipeline
+cd live
 GCS_BUCKET=<BUCKET_NAME> python transform_load_gcs.py
 GCS_BUCKET=<BUCKET_NAME> python load_to_firestore.py
 GCS_BUCKET=<BUCKET_NAME> python export_firestore_to_gcs.py
 python test_transform_local.py <RAW_CSV_PATH> <OUTPUT_CSV_PATH>   # no cloud resources needed
 
-# Modular pipeline
-cd modular
+# Production pipeline
+cd production
 GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> RAW_BLOB_NAME="raw/<MERCHANT_ID>/<Month Year>.csv" \
   python staging_service.py transform
 GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> TRANSFORMED_BLOB_NAME="transformed/<MERCHANT_ID>/Transformed_<Month>_<Year>.csv" \
   python staging_service.py reconcile
 
-MODULAR_TEST_BUCKET=<TEST_BUCKET_NAME> python test_staging_service.py   # requires live GCP data, see the script's docstring
+PRODUCTION_TEST_BUCKET=<TEST_BUCKET_NAME> python test_staging_service.py   # requires live GCP data, see the script's docstring
 ```
 
 ## 8. Useful `gcloud` commands while debugging

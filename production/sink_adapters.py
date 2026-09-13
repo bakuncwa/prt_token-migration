@@ -3,11 +3,11 @@ system. Selected per merchant via configs/<merchant>.json's
 "sink_adapter" field.
 
 digitalocean_kubernetes is CardCorp's real instance (Payreto's
-DigitalOcean-hosted MIT database), ported from the original pipeline's
+DigitalOcean-hosted MIT database), ported from the live pipeline's
 deploy_digitalocean.py:push_records_to_digitalocean() -- and it carries
 the same placeholder status: no live DigitalOcean API write credentials
-are configured in this environment yet, for either the original or the
-modular pipeline. See open_decisions.py.
+are configured in this environment yet, for either the live or the
+production pipeline. See open_decisions.py.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def _sync_to_digitalocean_kubernetes(merchant: str, config: dict, df: pd.DataFra
 
     Placeholder: DigitalOcean write access has not been provisioned for
     Payreto in this environment. Replace the body once the actual
-    DOKS-fronted target endpoint is known -- same shape as the original
+    DOKS-fronted target endpoint is known -- same shape as the live
     pipeline's push_records_to_digitalocean(), e.g.:
 
         resp = requests.post(

@@ -1,6 +1,6 @@
 {
   "merchant": "cardcorp",
-  "description": "CardCorp -> Revolut Bank acquirer migration. Ported 1:1 from original/column_mapping.py to prove the generalized loader reproduces the live pipeline's behavior before any other merchant is onboarded.",
+  "description": "CardCorp -> Revolut Bank acquirer migration. Ported 1:1 from live/column_mapping.py to prove the generalized loader reproduces the live pipeline's behavior before any other merchant is onboarded.",
   "reconciled_by": {
     "id_column": "card.id",
     "fields": ["card.number"]

@@ -3,7 +3,7 @@ configs/<merchant>.json's "store" block -- staging_service.py never
 imports a specific store client directly.
 
 Firestore is the real, working default (same one-field-per-document
-shape as original/load_to_firestore.py and export_firestore_to_gcs.py,
+shape as live/load_to_firestore.py and export_firestore_to_gcs.py,
 generalized to whatever fields configs/<merchant>.json's reconciled_by
 declares). SQL is an explicit placeholder: worth offering per-merchant
 when a merchant's downstream systems need joins/reporting Firestore

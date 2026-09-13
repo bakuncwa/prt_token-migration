@@ -3,7 +3,7 @@ raw/<merchant>/. Selected per merchant via configs/<merchant>.json's
 "extraction_adapter" field.
 
 cloud_run_puller is the default: a scheduled Cloud Run job doing one GET
-call and one GCS upload, the same shape as the original pipeline's
+call and one GCS upload, the same shape as the live pipeline's
 extract_digitalocean.py. dataflow is an explicit placeholder for the
 merchants that actually need it -- see DESIGN.md's "extraction" verdict:
 default to the lightweight puller, adopt Dataflow only where a
@@ -32,7 +32,7 @@ def extract(merchant: str, config: dict, raw_blob_name: str) -> str:
 
 def _extract_via_cloud_run_puller(merchant: str, config: dict, raw_blob_name: str) -> str:
     """GET the source dataset and stage it to raw/<merchant>/. Placeholder,
-    same status as the original pipeline's extract_digitalocean.py: no
+    same status as the live pipeline's extract_digitalocean.py: no
     live source-system API credentials are configured in this
     environment, so this documents the intended shape rather than
     guessing at an endpoint."""

@@ -7,16 +7,16 @@ layer for the one field that can't be automated: the new card number (PAN).
 
 This repo holds two things side by side:
 
-- **[`original/`](original/)** -- the live, single-merchant pipeline built for CardCorp's
+- **[`live/`](live/)** -- the live, single-merchant pipeline built for CardCorp's
   migration to the Revolut Bank acquirer gateway. Deployed and running today.
-- **[`modular/`](modular/)** -- the generalized, config-driven version of the same
+- **[`production/`](production/)** -- the generalized, config-driven version of the same
   pipeline, built to onboard any merchant's token migration without touching the
-  pipeline code itself. See [Modular version](#modular-version) below.
+  pipeline code itself. See [Production version](#production-version) below.
 
 New to either pipeline? **[`SETUP.md`](SETUP.md)** covers authentication, required IAM
 roles, and the `gcloud` commands to deploy and debug both.
 
-## Architecture (original pipeline)
+## Architecture (live pipeline)
 
 ![Token Migration ETL diagram](DigitalOcean%20Card%20Token%20Migration%20ETL%20%282%29.png)
 
@@ -53,16 +53,16 @@ place. The full reconciled record (all transformed columns + whatever `card.numb
 Firestore currently holds) is only ever reassembled at export time, by reading the
 transformed CSV fresh from GCS and overlaying Firestore's value per `card.id`.
 
-## Pipeline stages (original)
+## Pipeline stages (live)
 
 | # | Stage | Script | Trigger | Reads | Writes |
 |---|-------|--------|---------|-------|--------|
-| 1 | Extract | `original/extract_digitalocean.py` | manual / scheduled | DigitalOcean MIT DB (via Kubernetes API) | `raw/<Month Year>.csv` |
-| 2 | Transform | `original/cf_transform_on_upload.py` | GCS finalize on `raw/*.csv` | `raw/*.csv` | `transformed/Transformed_<Month>_<Year>.csv` |
-| 3 | Load to Firestore | `original/cf_load_firestore_on_upload.py` | GCS finalize on `transformed/*.csv` | `transformed/*.csv` | Firestore `MMYYYY_cardholders` (card.number only) |
+| 1 | Extract | `live/extract_digitalocean.py` | manual / scheduled | DigitalOcean MIT DB (via Kubernetes API) | `raw/<Month Year>.csv` |
+| 2 | Transform | `live/cf_transform_on_upload.py` | GCS finalize on `raw/*.csv` | `raw/*.csv` | `transformed/Transformed_<Month>_<Year>.csv` |
+| 3 | Load to Firestore | `live/cf_load_firestore_on_upload.py` | GCS finalize on `transformed/*.csv` | `transformed/*.csv` | Firestore `MMYYYY_cardholders` (card.number only) |
 | 4 | Manual reconciliation | *(Firestore Console)* | human | -- | Firestore `card_number` field, per `card.id` |
-| 5 | Export / reconcile | `original/export_firestore_to_gcs.py` | Firestore Console "Export" click, or any Firestore write | `transformed/*.csv` + Firestore | `cleaned/Reconciled_*.csv` |
-| 6 | Sync back | `original/deploy_digitalocean.py` | GCS finalize on `cleaned/*.csv` | `cleaned/*.csv` | DigitalOcean MIT DB (via Kubernetes API) |
+| 5 | Export / reconcile | `live/export_firestore_to_gcs.py` | Firestore Console "Export" click, or any Firestore write | `transformed/*.csv` + Firestore | `cleaned/Reconciled_*.csv` |
+| 6 | Sync back | `live/deploy_digitalocean.py` | GCS finalize on `cleaned/*.csv` | `cleaned/*.csv` | DigitalOcean MIT DB (via Kubernetes API) |
 
 Stage 1 (`extract_digitalocean.py`) and the DigitalOcean-write leg of stage 6
 (`push_records_to_digitalocean()` in `deploy_digitalocean.py`) are templates only --
@@ -74,9 +74,9 @@ Each month's dataset gets its own dated Firestore collection (`MMYYYY_cardholder
 e.g. `052025_cardholders`), derived from the filename via `collection_naming.py`, so
 re-processing an old month never collides with the current one.
 
-## Column mapping (original)
+## Column mapping (live)
 
-Renames/splits applied by `original/column_mapping.py` (source of truth:
+Renames/splits applied by `live/column_mapping.py` (source of truth:
 `Data Transformation_TokenMigration.xlsx`); every other raw column is preserved
 as-is.
 
@@ -97,7 +97,7 @@ as-is.
 source mapping exists for them) rather than fabricated. `card.number` is filled in
 later, exclusively via the Firestore reconciliation step above.
 
-## Deployed Cloud Run functions (original)
+## Deployed Cloud Run functions (live)
 
 All deployed as Cloud Run functions (Gen2 Cloud Functions), project
 `cardcorp-token-migration`, region `europe-west2`, bucket `cardcorp-token-0dc1f93138`:
@@ -113,19 +113,19 @@ All deployed as Cloud Run functions (Gen2 Cloud Functions), project
 Each function's exact `gcloud functions deploy` command is documented in its own
 script's module docstring.
 
-## Modular version
+## Production version
 
-`modular/` generalizes the pipeline above into a config-driven "token migration as a
+`production/` generalizes the pipeline above into a config-driven "token migration as a
 service": the same read → transform → reconcile → write shape, but which merchant,
 which mapping rules, which extraction source, and which sink system are all
 configuration, not code.
 
-![Modular Token Migration ETL diagram](Modular%20Token%20Migration%20ETL.png)
+![Production Token Migration ETL diagram](Production%20Token%20Migration%20ETL.png)
 
 **What stays the same:** the staging logic itself -- read a source, apply a mapping,
-write a destination -- is the identical shape as `original/column_mapping.py` and
-`original/export_firestore_to_gcs.py`'s merge step, now driven by
-`modular/configs/<merchant>.json` instead of hardcoded rename dicts. Firestore's role
+write a destination -- is the identical shape as `live/column_mapping.py` and
+`live/export_firestore_to_gcs.py`'s merge step, now driven by
+`production/configs/<merchant>.json` instead of hardcoded rename dicts. Firestore's role
 is unchanged too: still exactly one field, still edited through its own Console, now
 namespaced by merchant as well as by month (`<merchant>_MMYYYY_cardholders`).
 
@@ -138,47 +138,47 @@ namespaced by merchant as well as by month (`<merchant>_MMYYYY_cardholders`).
 | Reconciliation store | Firestore, one field per document | SQL (for merchants needing joins/reporting) |
 | Sink | pluggable adapter, e.g. DigitalOcean Kubernetes for Payreto | any merchant's own target system |
 
-Full reasoning behind each of those defaults: [`modular/DESIGN.md`](modular/DESIGN.md).
+Full reasoning behind each of those defaults: [`production/DESIGN.md`](production/DESIGN.md).
 
 **What's still a placeholder, on purpose, tracked as data rather than left implicit:**
-see [`modular/open_decisions.py`](modular/open_decisions.py). As of this write-up:
+see [`production/open_decisions.py`](production/open_decisions.py). As of this write-up:
 
-- **Gemini review gate** -- unresolved. `modular/gemini_mapping_agent.py` proposes a
+- **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py` proposes a
   mapping config but deliberately refuses to write it anywhere until a review gate
   exists; it currently raises rather than silently trusting an unreviewed proposal.
-- **DigitalOcean access for Payreto** -- unresolved. Both `original/`'s and
-  `modular/`'s DigitalOcean legs (extraction and sink) are placeholders; nothing on
+- **DigitalOcean access for Payreto** -- unresolved. Both `live/`'s and
+  `production/`'s DigitalOcean legs (extraction and sink) are placeholders; nothing on
   the GCS/Firestore side of either pipeline is blocked by this.
 - **Test strategy** -- resolved. See below.
 
 ### What's been tested
 
-`modular/test_staging_service.py` runs against live GCP data, not mocks:
+`production/test_staging_service.py` runs against live GCP data, not mocks:
 
-1. `modular/staging_service.py`'s config-driven `transform_dataframe()` reproduces
-   `original/column_mapping.py`'s hardcoded `transform_dataframe()` byte-for-byte, on
+1. `production/staging_service.py`'s config-driven `transform_dataframe()` reproduces
+   `live/column_mapping.py`'s hardcoded `transform_dataframe()` byte-for-byte, on
    the real CardCorp `raw/January 2026.csv`.
-2. Its `reconcile_dataframe()` reproduces `original/export_firestore_to_gcs.py`'s
+2. Its `reconcile_dataframe()` reproduces `live/export_firestore_to_gcs.py`'s
    `merge_card_numbers()` byte-for-byte, reading the real, live
    `012026_cardholders` Firestore collection -- proving that when a card number is
-   reconciled in Firestore, the modular staging layer's transformation still works,
+   reconciled in Firestore, the production staging layer's transformation still works,
    running through the generalized Cloud Run script rather than the
-   CardCorp-only original.
+   CardCorp-only live pipeline.
 3. `run_transform()` and `run_reconcile()` run end to end against a separate test
-   bucket (`cardcorp-token-migration-modular-test`), seeded from the same source data
-   the original pipeline uses, for direct comparison.
+   bucket (`cardcorp-token-migration-production-test`), seeded from the same source data
+   the live pipeline uses, for direct comparison.
 
-## Cost: low-cost (original) vs. high-cost (modular) path
+## Cost: low-cost (live) vs. high-cost (production) path
 
-For a business weighing whether to adopt the modular version merchant-by-merchant:
-the pluggable design in `modular/` means cost scales with which adapters a merchant
+For a business weighing whether to adopt the production version merchant-by-merchant:
+the pluggable design in `production/` means cost scales with which adapters a merchant
 actually opts into, not with the codebase itself. Every merchant on the default path
 (Cloud Run puller, Firestore, no Dataflow, no SQL) costs about the same as the
-original pipeline does today; Dataflow and Cloud SQL are the two line items that turn
+live pipeline does today; Dataflow and Cloud SQL are the two line items that turn
 "a few dollars" into a real recurring bill, and both are opt-in per merchant, not
 pipeline-wide.
 
-| Cost driver | Original (CardCorp only) | Modular -- low cost (Firestore + Cloud Run puller, default path) | Modular -- high cost (+ Dataflow, + Cloud SQL, opted in) |
+| Cost driver | Live (CardCorp only) | Production -- low cost (Firestore + Cloud Run puller, default path) | Production -- high cost (+ Dataflow, + Cloud SQL, opted in) |
 |---|---|---|---|
 | Compute (Cloud Run functions) | Within Always Free tier (2M invocations, 400K GB-s/mo) at this volume | Same free tier, shared across merchants -- still ~\$0 through dozens of low-volume merchants | Same |
 | Extraction | Cloud Run puller, included above | Cloud Run puller, included above | + Dataflow: no free tier -- roughly \$0.05-\$0.30 per batch run (worker warm-up + vCPU/memory-hour), scaling with run frequency and volume |
@@ -190,7 +190,7 @@ pipeline-wide.
 
 **Recommendation for adoption:** default every new merchant to the low-cost path; only
 approve Dataflow or Cloud SQL for a specific merchant when their volume or downstream
-reporting genuinely requires it (same reasoning as `modular/DESIGN.md`'s verdicts).
+reporting genuinely requires it (same reasoning as `production/DESIGN.md`'s verdicts).
 That keeps the marginal cost of onboarding merchant *N+1* close to zero until one
 specifically needs the expensive adapters.
 
@@ -208,7 +208,7 @@ specifically needs the expensive adapters.
   transfer client migrations to the Revolut Bank acquirer API gateway.
 - Generalized a single-merchant pipeline into a config-driven, multi-merchant
   "token migration as a service" architecture with pluggable extraction, staging,
-  and sink adapters, validated against the original pipeline's live production data.
+  and sink adapters, validated against the live pipeline's real production data.
 
 | | |
 |---|---|
@@ -221,9 +221,9 @@ specifically needs the expensive adapters.
 
 Every Cloud Run function has a corresponding manual-run script (`main()`) for local
 testing without touching the deployed triggers -- see each file's module docstring
-for required/optional environment variables and usage. `original/test_transform_local.py`
+for required/optional environment variables and usage. `live/test_transform_local.py`
 exercises the transform step against a local CSV with no cloud resources at all;
-`modular/test_staging_service.py` is the modular pipeline's equivalent, run against
+`production/test_staging_service.py` is the production pipeline's equivalent, run against
 live data (see above).
 
 ## Data handling

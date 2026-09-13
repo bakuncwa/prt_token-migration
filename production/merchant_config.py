@@ -1,11 +1,11 @@
-"""Per-merchant configuration for the modular Token Migration ETL.
+"""Per-merchant configuration for the production Token Migration ETL.
 
-Generalizes original/column_mapping.py (one hardcoded merchant, CardCorp)
-and original/collection_naming.py (one fixed collection shape) into a
+Generalizes live/column_mapping.py (one hardcoded merchant, CardCorp)
+and live/collection_naming.py (one fixed collection shape) into a
 declarative config any merchant's onboarding can drop in as a new
 configs/<merchant>.json, with zero changes to staging_service.py.
 
-configs/cardcorp.json is CardCorp's mapping ported 1:1 from the original
+configs/cardcorp.json is CardCorp's mapping ported 1:1 from the live
 pipeline -- it exists to prove this loader reproduces the live pipeline's
 behavior, not as a second, divergent copy of the mapping rules.
 """
@@ -38,7 +38,7 @@ def load_merchant_config(merchant: str) -> dict:
 
 def collection_for_blob_name(merchant: str, blob_name: str, config: dict) -> str:
     """"transformed/cardcorp/Transformed_May_2025.csv" -> "cardcorp_052025_cardholders".
-    Same MMYYYY dating as the original pipeline, namespaced by merchant so
+    Same MMYYYY dating as the live pipeline, namespaced by merchant so
     two merchants' May 2025 batches never collide in the same Firestore
     database."""
     stem = blob_name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
