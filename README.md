@@ -5,26 +5,26 @@ MIT (Merchant-Initiated Transaction) database into a new token vault, using Goog
 Cloud Storage as staging and Firestore as a narrow, single-purpose reconciliation
 layer for the one field that cannot be automated: the new card number (PAN).
 
-## Contents
+## Index
 
-- **[`live/`](live/)** -- the live, single-merchant pipeline built for CardCorp's
-  migration to the Revolut Bank acquirer gateway. Deployed and running today.
-- **[`production/`](production/)** -- the generalized, config-driven version of the
-  same pipeline, built to onboard any merchant's token migration without modifying
-  the pipeline code. See [Production version](#production-version).
-- **[`SETUP.md`](SETUP.md)** -- setup and deployment reference: authentication,
-  required IAM roles, environment variables, and the exact `gcloud` commands to
-  deploy and debug both pipelines.
-- [Architecture (live pipeline)](#architecture-live-pipeline)
-- [Firestore scope: why only `card.number`](#firestore-scope-why-only-cardnumber)
-- [Pipeline stages (live)](#pipeline-stages-live)
-- [Column mapping (live)](#column-mapping-live)
-- [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
-- [Production version](#production-version)
-- [Cost comparison](#cost-comparison)
-- [Key Technical Contributions & Impact](#key-technical-contributions--impact)
-- [Local development](#local-development)
-- [Data handling](#data-handling)
+- **I.** **[`live/`](live/)** -- the live, single-merchant pipeline built for
+  CardCorp's migration to the Revolut Bank acquirer gateway. Deployed and running
+  today.
+- **II.** **[`production/`](production/)** -- the generalized, config-driven version
+  of the same pipeline, built to onboard any merchant's token migration without
+  modifying the pipeline code. See [Production version](#production-version).
+- **III.** **[`SETUP.md`](SETUP.md)** -- setup and deployment reference:
+  authentication, required IAM roles, environment variables, and the exact `gcloud`
+  commands to deploy and debug both pipelines.
+- **IV.** [Architecture (live pipeline)](#architecture-live-pipeline)
+- **V.** [Firestore scope: why only `card.number`](#firestore-scope-why-only-cardnumber)
+- **VI.** [Pipeline stages (live)](#pipeline-stages-live)
+- **VII.** [Column mapping (live)](#column-mapping-live)
+- **VIII.** [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
+- **IX.** [Production version](#production-version)
+- **X.** [Cost comparison](#cost-comparison)
+- **XI.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
+- **XII.** [Data handling](#data-handling)
 
 ## Architecture (live pipeline)
 
@@ -127,10 +127,9 @@ same commands is in [`SETUP.md`](SETUP.md).
 
 ## Production version
 
-`production/` generalizes the pipeline above into a config-driven "token migration as
-a service": the same read, transform, reconcile, write shape, but the merchant, the
-mapping rules, the extraction source, and the sink system are all configuration, not
-code.
+`production/` implements the same read, transform, reconcile, write shape as the
+pipeline above, but the merchant, the mapping rules, the extraction source, and the
+sink system are all configuration, not code.
 
 ![Production Token Migration ETL diagram](Production%20Token%20Migration%20ETL.png)
 
@@ -141,6 +140,14 @@ mapping, write a destination -- is the same shape as `live/column_mapping.py` an
 Firestore's role is unchanged: still exactly one field, still edited through its own
 Console, now namespaced by merchant as well as by month
 (`<merchant>_MMYYYY_cardholders`).
+
+**PCI scoping extends to the extraction boundary:** in production, a source system
+such as DigitalOcean's MIT database is expected to return the PAN column already
+blank, the same assumption `live/column_mapping.py` documents for CardCorp's raw
+export. `production/extraction_adapters.py` does not trust that assumption silently
+-- `upload_raw_csv()` blanks any PAN-shaped column (`FullAccountNumber`,
+`CardNumber`, `PAN`, `card.number`) unconditionally before a byte reaches GCS,
+regardless of which extraction adapter fetched the data.
 
 **What is pluggable, per merchant:**
 
@@ -157,15 +164,15 @@ Full reasoning behind each default: [`production/DESIGN.md`](production/DESIGN.m
 see [`production/open_decisions.py`](production/open_decisions.py). As of this
 write-up:
 
-- **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py`
-  proposes a mapping config but deliberately refuses to write it anywhere until a
-  review gate exists; it raises rather than trusting an unreviewed proposal.
-- **DigitalOcean access for Payreto** -- unresolved. Both `live/`'s and
-  `production/`'s DigitalOcean legs (extraction and sink) are placeholders; neither
-  pipeline's GCS/Firestore side is blocked by this.
-- **Test strategy** -- resolved. See below.
+1. **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py`
+   proposes a mapping config but deliberately refuses to write it anywhere until a
+   review gate exists; it raises rather than trusting an unreviewed proposal.
+2. **DigitalOcean access for Payreto** -- unresolved. Both `live/`'s and
+   `production/`'s DigitalOcean legs (extraction and sink) are placeholders; neither
+   pipeline's GCS/Firestore side is blocked by this.
+3. **Test strategy** -- resolved. See below.
 
-### What has been tested
+### Test Results
 
 `production/test_staging_service.py` runs four checks, two of them independent of
 any cloud credential:
@@ -251,23 +258,11 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   and sink adapters, validated against both the live pipeline's real production
   data and a structurally different synthetic merchant schema.
 
-| | |
-|---|---|
-| **2,275** | production records reconciled |
-| **16** | monthly cycles processed |
-| **0** | pipeline errors |
-| **1** | field ever touched by a human reviewer (`card.number`) |
-| **2** | merchant schemas validated against the production staging service |
-
-## Local development
-
-Every Cloud Run function has a corresponding manual-run script (`main()`) for local
-testing without touching the deployed triggers; see each file's module docstring for
-required and optional environment variables and usage. `live/test_transform_local.py`
-exercises the transform step against a local CSV with no cloud resources at all.
-`production/test_staging_service.py` is the production pipeline's equivalent;
-its second check (the `samplepay` schema) also requires no cloud resources, while
-its other three checks run against live data (see above).
+- **2,275** -- production records reconciled
+- **16** -- monthly cycles processed
+- **0** -- pipeline errors
+- **1** -- field ever touched by a human reviewer (`card.number`)
+- **2** -- merchant schemas validated against the production staging service
 
 ## Data handling
 
