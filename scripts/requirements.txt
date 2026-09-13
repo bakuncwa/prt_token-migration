@@ -1,0 +1,8 @@
+pandas>=2.0
+google-cloud-storage>=2.16
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+google-cloud-firestore>=2.16
+functions-framework>=3.5
+google-events>=0.14
+requests>=2.31
