@@ -1,69 +1,83 @@
-# Viewing/editing the transformed data (Firestore)
+# Viewing and Editing the Transformed Dataset (Firestore)
 
-Alternative to `DATABASE_ACCESS.md` (Postgres + Adminer): the same
-transformed dataset loaded into Firestore Native mode instead. No VM, no
-IAP tunnel, no password to manage -- browse/edit directly in the GCP
-Console with your normal Google login.
+This document describes an alternative to `DATABASE_ACCESS.md` (PostgreSQL
+with Adminer): the identical transformed dataset, loaded instead into
+Firestore Native mode. This approach requires no virtual machine, no
+Identity-Aware Proxy (IAP) tunnel, and no password to manage; records may be
+browsed and edited directly within the Google Cloud Platform (GCP) Console
+using the operator's standard Google credentials.
 
-- **Database**: `(default)`, Native mode, location `europe-west2`
-  (project `cardcorp-token-migration`), created with `freeTier: true`.
-- **Collection**: `MMYYYY_cardholders`, one per month -- e.g. May 2025's
-  data lives in `052025_cardholders`. Derived from the transformed
-  filename by `collection_naming.py`, so re-loading an old month never
-  collides with the current one. One document per row, document ID =
-  the row's `card.id`, so re-running the loader overwrites/upserts
-  existing rows within that month's collection instead of duplicating
-  them.
-- **What's actually in each document**: only one field, `card_number` --
-  every other column (name, address, transaction metadata, ...) is
-  intentionally never sent to Firestore at all; it stays in the
-  transformed CSV in GCS. `card.number` is the one field the automated
-  transform can never populate (the raw PAN is blank in the source), so
-  this is the only thing a PaaS worker needs to see or enter here. The
-  full reconciled record is reassembled at export time in
-  `export_firestore_to_gcs.py` by merging this value back into the
-  transformed CSV by `card.id` -- see `merge_card_numbers()` there.
-- **Cost**: Firestore's Always Free daily quota is 1 GiB storage / 50K
-  reads / 20K writes / 20K deletes -- 24 rows and manual browsing is
-  nowhere close to that. $0/month, no time limit, no VM to leave running.
+- **Database:** `(default)`, Native mode, location `europe-west2` (project
+  `cardcorp-token-migration`), provisioned with `freeTier: true`.
+- **Collection structure:** `MMYYYY_cardholders`, one collection per calendar
+  month -- for example, May 2025's dataset resides within
+  `052025_cardholders`. The collection identifier is derived from the
+  transformed filename by `collection_naming.py`, such that the reloading of
+  a prior month's data does not produce a collision with the current month.
+  Each document corresponds to a single row, with the document identifier
+  equal to that row's `card.id`; consequently, a repeated execution of the
+  loader overwrites, or upserts, existing rows within that month's
+  collection, rather than duplicating them.
+- **Document content:** each document contains exactly one field,
+  `card_number`; every other column (name, address, transaction metadata,
+  and so forth) is deliberately never transmitted to Firestore, and instead
+  remains within the transformed CSV in Google Cloud Storage (GCS).
+  `card.number` constitutes the sole field that the automated transformation
+  procedure cannot populate, inasmuch as the raw Primary Account Number
+  (PAN) is blank within the source data; accordingly, it is the only field a
+  PaaS worker is required to view or enter within this interface. The
+  complete reconciled record is reassembled at export time within
+  `export_firestore_to_gcs.py`, through the merging of this value into the
+  transformed CSV by `card.id`; see `merge_card_numbers()` therein.
+- **Cost:** Firestore's Always Free daily quota comprises 1 GiB of storage
+  and 50,000 reads, 20,000 writes, and 20,000 deletes; the present usage of
+  24 rows, together with manual browsing, remains substantially below this
+  threshold. The resultant cost is \$0.00 per month, subject to no time
+  limitation and requiring no virtual machine to remain in operation.
 
-## Open the web UI (Cloud Console)
+## Accessing the Web Interface (Cloud Console)
 
-Go to (replace `052025_cardholders` with the month you want):
+Navigate to the following address, substituting `052025_cardholders` with
+the calendar month of interest:
 
 https://console.cloud.google.com/firestore/databases/-default-/data/panel/052025_cardholders?project=cardcorp-token-migration
 
-Log in with a Google account that has IAM access to the
-`cardcorp-token-migration` project (Owner/Editor, or at minimum
-`roles/datastore.user`). Click any document to edit its fields inline,
-or use "Add document" to create a new one.
+Authentication requires a Google account possessing IAM access to the
+`cardcorp-token-migration` project (Owner or Editor role, or, at minimum,
+`roles/datastore.user`). Selection of any document permits inline editing of
+its fields; the "Add document" control permits the creation of a new
+document.
 
-## Reload from a fresh transformed CSV
+## Reloading From an Updated Transformed CSV
 
-1. Run `transform_load_gcs.py` to (re)produce the transformed CSV in
-   GCS, if the raw source changed.
-2. Run the loader:
+1. Execute `transform_load_gcs.py` to regenerate the transformed CSV within
+   GCS, in the event that the raw source data has changed.
+2. Execute the loader:
 
    ```
    GCS_BUCKET=cardcorp-token-0dc1f93138 python3 load_to_firestore.py
    ```
 
-Because documents are keyed by `card.id`, this **upserts**: rows whose
-`card.id` still exists get their `card_number` overwritten with the
-transformed CSV's value (any manually-entered card number for that row
-is lost), but documents for `card.id`s no longer in the CSV are left in
-place rather than deleted. If you need old rows removed on reload too,
-ask and the script can be changed to a delete-then-load pass instead.
+Inasmuch as documents are indexed by `card.id`, this procedure constitutes an
+**upsert** operation: rows whose `card.id` remains present have their
+`card_number` field overwritten with the transformed CSV's corresponding
+value (any manually entered card number for that row is consequently lost),
+whereas documents corresponding to a `card.id` no longer present within the
+CSV are retained rather than deleted. Should the removal of obsolete rows
+upon reload be required, the script may be modified to execute a
+delete-then-load procedure instead; such a modification should be requested
+explicitly.
 
-## Firestore vs. Postgres/Adminer (`DATABASE_ACCESS.md`)
+## Firestore Versus PostgreSQL/Adminer (`DATABASE_ACCESS.md`)
 
-| | Firestore | Postgres + Adminer |
+| | Firestore | PostgreSQL + Adminer |
 |---|---|---|
-| Maintenance | none (managed) | you own the VM |
-| Access | Cloud Console, normal login | IAP tunnel + DB password |
-| Cost | $0, no time/region limit | $0, `e2-micro` Always Free |
-| Data model | NoSQL documents | relational table, SQL |
-| Editing | per-document/field | spreadsheet-like grid |
+| Maintenance | none required (fully managed) | virtual machine ownership required |
+| Access | Cloud Console, standard credentials | IAP tunnel with database password |
+| Cost | \$0.00, subject to no time or region limitation | \$0.00, `e2-micro` Always Free tier |
+| Data model | NoSQL document store | relational table, accessed via SQL |
+| Editing interface | per-document, per-field | spreadsheet-style grid |
 
-Both are loaded from the same transformed CSV in GCS and can be kept
-side by side, or you can drop one once you decide which fits better.
+Both alternatives are populated from the identical transformed CSV within
+GCS and may be maintained concurrently, or one may be discontinued once a
+preference has been determined.

@@ -1,48 +1,66 @@
-# Production pipeline: design decisions
+# Production Pipeline: Architectural Design Decisions
 
-Weighs a general-purpose "token migration as a service" pipeline against the
-CardCorp → Revolut Bank case it's generalized from. Full diagrams and reasoning:
-see the architecture review published alongside this work; the verdicts below are
-what the code in this directory actually implements.
+This document evaluates the merits of a general-purpose "token migration as a
+service" pipeline relative to the CardCorp-to-Revolut Bank instance from which
+it was generalized. The complete diagrammatic representation and supporting
+rationale are published alongside this work; the verdicts articulated below
+correspond precisely to the implementation contained within this directory.
 
-## Extraction: Dataflow vs. a scheduled Cloud Run puller
+## Extraction: Dataflow Versus a Scheduled Cloud Run Puller
 
-**Verdict:** default to a scheduled Cloud Run job per merchant (`extraction_adapters.py`,
-`cloud_run_puller`); offer Dataflow (`dataflow`) as an explicit opt-in only for a
-merchant whose source volume or shape needs it.
+**Verdict:** the default configuration for each merchant should be a scheduled
+Cloud Run job (`extraction_adapters.py`, `cloud_run_puller`); Dataflow
+(`dataflow`) should be offered exclusively as an explicit opt-in, reserved for
+a merchant whose data volume or structural characteristics necessitate it.
 
-Today's extraction is one GET call a month for roughly 140 rows on average — 2,275
-rows across 16 monthly cycles for CardCorp alone. Dataflow's autoscaling worker pool
-and windowing model solve problems this pipeline doesn't have yet, at the cost of a
-second execution substrate alongside Cloud Run. Dataflow earns its place once a
-merchant extracts continuously, or at a volume a single Cloud Run request can't
-finish inside one timeout window.
+The extraction procedure, as presently constituted, comprises a single GET
+request executed monthly, retrieving approximately 140 rows on average --
+2,275 rows in aggregate across 16 monthly cycles for CardCorp alone.
+Dataflow's autoscaling worker pool and windowing model address computational
+problems that this pipeline does not, at present, possess, at the expense of
+introducing a second execution substrate alongside Cloud Run. Dataflow's
+adoption becomes justified once a given merchant requires continuous
+extraction, or extraction at a volume that a single Cloud Run request cannot
+complete within one timeout interval.
 
-## Staging & transform: Python + Gemini-modifiable config vs. Dataprep
+## Staging and Transformation: Python With Gemini-Modifiable Configuration Versus Dataprep
 
-**Verdict:** a declarative per-merchant mapping config (`configs/<merchant>.json`),
-proposed by a Gemini agent (`gemini_mapping_agent.py`) and reviewed by a human before
-deploy, is the more modular choice. Dataprep, if used at all, is an optional
-human-facing profiling step during onboarding — not the pipeline's execution engine.
+**Verdict:** a declarative, per-merchant mapping configuration
+(`configs/<merchant>.json`), proposed by a Gemini agent
+(`gemini_mapping_agent.py`) and subject to human review prior to deployment,
+constitutes the more modular architectural choice. Dataprep, to the extent it
+is employed at all, should function exclusively as an optional, human-facing
+profiling instrument during merchant onboarding, rather than as the
+pipeline's execution engine.
 
-A Gemini agent can read a declarative config the same way it reads code: shown
-current fields and sample rows, it proposes a diff, and a human approves before it's
-live. That keeps the transform git-diffable, testable, and deployable through
-ordinary CI/CD. Dataprep's recipes live in a proprietary flow format that isn't
-naturally something an LLM agent edits or a pull request reviews, and Google's
-investment in Dataprep has visibly slowed in recent years.
+A Gemini agent is capable of interpreting a declarative configuration in
+substantially the same manner as it interprets source code: presented with
+the current field schema and representative sample rows, the agent proposes
+a differential, which a human reviewer subsequently approves prior to
+deployment. This arrangement preserves the transformation logic's
+compatibility with version control diffing, automated testing, and
+deployment via conventional continuous integration and continuous deployment
+(CI/CD) infrastructure. Dataprep's recipes, by contrast, are persisted in a
+proprietary flow format that is not readily amenable to modification by a
+large language model agent, nor to review within the context of a pull
+request; furthermore, Google's continued investment in Dataprep has
+demonstrably diminished in recent years.
 
-## Reconciliation store: Firestore vs. SQL
+## Reconciliation Store: Firestore Versus SQL
 
-**Verdict:** Firestore stays the default (`store_adapters.py`, `firestore`),
-namespaced per merchant per period (`<merchant>_MMYYYY_<prefix>`). SQL
-(`sql`) is an explicit, unimplemented placeholder until a specific merchant's
-downstream systems need joins or reporting Firestore can't do.
+**Verdict:** Firestore should remain the default reconciliation store
+(`store_adapters.py`, `firestore`), namespaced per merchant and per period
+(`<merchant>_MMYYYY_<prefix>`). A SQL-backed store (`sql`) should remain an
+explicit, unimplemented placeholder pending a specific merchant's requirement
+for relational joins or reporting capabilities that Firestore cannot provide.
 
-Reconciliation is a single-field lookup by key, edited by a human through a UI —
-exactly what Firestore's own Console already gives for free, with no VM, IAP
-tunnel, or password file to manage.
+The reconciliation procedure constitutes, in its entirety, a single-field
+lookup by key, subject to human editing through a graphical interface --
+precisely the functionality that Firestore's own Console provides without
+additional cost, and without the operational burden of a virtual machine,
+an Identity-Aware Proxy (IAP) tunnel, or a managed password file.
 
-## Open decisions
+## Outstanding Decisions
 
-Tracked as data, not just prose — see `open_decisions.py`.
+These are maintained as structured data rather than as unstructured prose;
+see `open_decisions.py`.

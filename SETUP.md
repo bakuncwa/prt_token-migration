@@ -1,24 +1,27 @@
-# Developer setup
+# Developer Setup and Deployment Reference
 
 ## Prerequisites
 
-- Python 3.12
-- [`gcloud` CLI](https://cloud.google.com/sdk/docs/install), authenticated against a
-  GCP project with billing enabled
-- On that project: Cloud Firestore (Native mode), Cloud Storage, Cloud Functions,
-  Cloud Run, Eventarc, and Cloud Build APIs enabled
-  (`gcloud services enable firestore.googleapis.com storage.googleapis.com cloudfunctions.googleapis.com run.googleapis.com eventarc.googleapis.com cloudbuild.googleapis.com`)
-- A Firestore database in **Native mode** already created in the target region
-  (`gcloud firestore databases create --location=<REGION> --type=firestore-native`)
+- Python 3.12.
+- The [`gcloud` CLI](https://cloud.google.com/sdk/docs/install), authenticated
+  against a Google Cloud Platform (GCP) project for which billing has been
+  enabled.
+- Within that project, the following APIs must be enabled: Cloud Firestore
+  (Native mode), Cloud Storage, Cloud Functions, Cloud Run, Eventarc, and Cloud
+  Build
+  (`gcloud services enable firestore.googleapis.com storage.googleapis.com cloudfunctions.googleapis.com run.googleapis.com eventarc.googleapis.com cloudbuild.googleapis.com`).
+- A Firestore database provisioned in **Native mode** within the target region
+  (`gcloud firestore databases create --location=<REGION> --type=firestore-native`).
 
-## 1. Authenticate
+## 1. Authentication Procedure
 
-This procedure involves two distinct credential stores: the `gcloud` CLI's own
-session, and the Application Default Credentials (ADC) that the Python client
-libraries (`google-cloud-storage`, `google-cloud-firestore`, and related packages)
-read at runtime. Both expire independently and require separate renewal when a
-script fails with a "Reauthentication failed" or "could not automatically determine
-credentials" error:
+This procedure necessitates the maintenance of two distinct credential stores:
+the `gcloud` CLI's own session credentials, and the Application Default
+Credentials (ADC) retrieved at runtime by the Python client libraries
+(`google-cloud-storage`, `google-cloud-firestore`, and related packages). These
+credential stores expire independently and therefore require separate renewal
+procedures whenever a script fails with a "Reauthentication failed" or "could
+not automatically determine credentials" exception:
 
 ```bash
 gcloud auth login                          # CLI session credentials
@@ -26,42 +29,43 @@ gcloud auth application-default login      # credentials read by the Python clie
 gcloud config set project <PROJECT_ID>
 ```
 
-To operate as a specific IAM principal rather than the default user account -- for
-example, to verify the permissions available to a deployed function's runtime
-service account:
+To assume the identity of a specific IAM principal in lieu of the default user
+account -- for instance, to verify the permissions granted to a deployed
+function's runtime service account:
 
 ```bash
 gcloud config set account <SERVICE_ACCOUNT_EMAIL>
 ```
 
-## 2. Required IAM roles
+## 2. Requisite IAM Roles
 
-**Required for the principal executing the following `gcloud` commands** (a
+**Requisite for the principal executing the subsequent `gcloud` commands** (a
 developer account or a CI/CD service account):
 
-| Role | Why |
+| Role | Rationale |
 |---|---|
-| `roles/cloudfunctions.developer` | deploy/update Cloud Functions |
-| `roles/run.admin` | Gen2 functions deploy as Cloud Run services under the hood |
-| `roles/iam.serviceAccountUser` | required for deploy commands to impersonate the function's runtime service account |
-| `roles/storage.admin` | create buckets, read/write objects for manual testing |
-| `roles/datastore.user` | read/write Firestore documents for manual testing |
+| `roles/cloudfunctions.developer` | enables deployment and modification of Cloud Functions |
+| `roles/run.admin` | Generation 2 functions are deployed as Cloud Run services at the infrastructure level |
+| `roles/iam.serviceAccountUser` | requisite for deployment commands to assume the identity of the function's runtime service account |
+| `roles/storage.admin` | enables bucket creation and object read/write operations for manual verification |
+| `roles/datastore.user` | enables read/write access to Firestore documents for manual verification |
 
-**For the deployed functions' runtime service account** (default:
-`<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`, unless `--service-account`
-overrides it at deploy time):
+**Requisite for the deployed functions' runtime service account** (default:
+`<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`, unless overridden at
+deployment time by the `--service-account` flag):
 
-| Role | Why |
+| Role | Rationale |
 |---|---|
-| `roles/storage.objectAdmin` | read/write the staging bucket's objects |
-| `roles/datastore.user` | read/write Firestore documents |
-| `roles/datastore.viewer` | `live/export_firestore_to_gcs.py`'s `on_export_completed` looks up Firestore Admin API export operations (`datastore.operations.list`/`get`) to read which collection(s) a Console export was scoped to -- without this role that lookup fails closed and it falls back to exporting every dated collection |
+| `roles/storage.objectAdmin` | enables read/write access to the staging bucket's objects |
+| `roles/datastore.user` | enables read/write access to Firestore documents |
+| `roles/datastore.viewer` | `live/export_firestore_to_gcs.py`'s `on_export_completed` function queries the Firestore Admin API for export operations (`datastore.operations.list`/`get`) to determine which collection(s) a given Console export was scoped to; absent this role, the query fails closed, and the function defaults to exporting every dated collection |
 
-`roles/editor` on the project satisfies all requirements listed above and reflects
-CardCorp's current deployment; this scope is acceptable for a single-project
-sandbox but exceeds what a production deployment should grant.
+The `roles/editor` role, applied at the project level, satisfies all
+requirements enumerated above and reflects the scope of CardCorp's current
+deployment; while acceptable for a single-project development environment,
+this scope exceeds what should be granted within a production deployment.
 
-## 3. Clone and install
+## 3. Repository Acquisition and Dependency Installation
 
 ```bash
 git clone <REPO_URL>
@@ -74,10 +78,12 @@ pip install -r live/requirements.txt   # to work on the live pipeline
 pip install -r production/requirements.txt    # to work on the production pipeline
 ```
 
-## 4. Environment variables
+## 4. Environment Variable Reference
 
-Every script reads these via `env()` at the top of its `main()` -- see each file's
-own docstring for the full, authoritative list. The common ones:
+Each script retrieves these values by means of the `env()` function invoked at
+the outset of its `main()` routine; consult each file's own docstring for the
+complete, authoritative enumeration. The variables common to both pipelines
+are enumerated below:
 
 | Variable | Used by | Example |
 |---|---|---|
@@ -88,9 +94,10 @@ own docstring for the full, authoritative list. The common ones:
 | `RAW_BLOB_NAME` | manual/CLI runs | `raw/<Month Year>.csv` (live) / `raw/<MERCHANT_ID>/<Month Year>.csv` (production) |
 | `DIGITALOCEAN_TOKEN`, `DO_CLUSTER_NAME` | DigitalOcean legs (placeholders until access is granted) | -- |
 
-## 5. Deploy: live pipeline
+## 5. Deployment Procedure: Live Pipeline
 
-Five Cloud Run functions (Gen2), one per stage. Execute each command from `live/`:
+This procedure deploys five Generation 2 Cloud Run functions, one per pipeline
+stage. Each command below must be executed from within the `live/` directory:
 
 ```bash
 cd live
@@ -134,13 +141,14 @@ gcloud functions deploy sync-paas-reconciled-to-digitalocean \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-## 6. Deploy: production pipeline
+## 6. Deployment Procedure: Production Pipeline
 
-**Constraint:** the Python Cloud Functions buildpack requires the entry-point file
-to be named `main.py` at the source root; `staging_service.py` does not satisfy this
-requirement as written. Stage a deploy directory containing a one-line `main.py`
-that re-exports the required entry points, rather than renaming the source file
-itself:
+**Architectural constraint:** the Python Cloud Functions buildpack imposes a
+requirement that the entry-point file be named `main.py` and reside at the
+source root; `staging_service.py`, as written, does not satisfy this
+requirement. The recommended remediation is the construction of a deployment
+directory containing a single-line `main.py` module that re-exports the
+requisite entry points, rather than renaming the source file itself:
 
 ```bash
 STAGE=$(mktemp -d)
@@ -166,13 +174,13 @@ gcloud functions deploy staging-on-firestore-write \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-**Onboarding a new merchant does not require a redeployment.** Adding
-`production/configs/<MERCHANT_ID>.json` (see `production/configs/cardcorp.json` for
-the required schema) takes effect on the next invocation, since the configuration
-is read from disk at runtime rather than embedded in the deployed image at build
-time.
+**The onboarding of a new merchant does not necessitate a redeployment.** The
+addition of `production/configs/<MERCHANT_ID>.json` (see
+`production/configs/cardcorp.json` for the requisite schema) takes effect upon
+the subsequent invocation, inasmuch as the configuration is read from disk at
+runtime rather than embedded within the deployed image at build time.
 
-## 7. Manual and local execution
+## 7. Manual and Local Execution Procedures
 
 ```bash
 # Live pipeline
@@ -192,7 +200,7 @@ GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> TRANSFORMED_BLOB_NAME="transform
 PRODUCTION_TEST_BUCKET=<TEST_BUCKET_NAME> python test_staging_service.py   # requires live GCP data, see the script's docstring
 ```
 
-## 8. Reference commands for diagnostics
+## 8. Diagnostic Command Reference
 
 ```bash
 # List deployed functions and their trigger type
