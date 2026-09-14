@@ -1,12 +1,5 @@
 # Developer setup
 
-Getting either pipeline (`live/` or `production/`) running from a clean machine:
-authentication, required IAM roles, environment variables, and the exact `gcloud`
-commands to deploy and debug. Placeholders below (`<PROJECT_ID>`, `<BUCKET_NAME>`,
-etc.) stand in for real values -- this doc is meant to work for a new environment,
-not just the one CardCorp runs in today (see each script's own module docstring for
-that pipeline's real, current values).
-
 ## Prerequisites
 
 - Python 3.12
@@ -20,20 +13,22 @@ that pipeline's real, current values).
 
 ## 1. Authenticate
 
-Two separate credential stores matter here -- the `gcloud` CLI's own session, and
-the Application Default Credentials (ADC) the Python client libraries
-(`google-cloud-storage`, `google-cloud-firestore`, ...) read at runtime. Both expire
-independently and need refreshing separately when a script starts failing with a
-"Reauthentication failed" or "could not automatically determine credentials" error:
+This procedure involves two distinct credential stores: the `gcloud` CLI's own
+session, and the Application Default Credentials (ADC) that the Python client
+libraries (`google-cloud-storage`, `google-cloud-firestore`, and related packages)
+read at runtime. Both expire independently and require separate renewal when a
+script fails with a "Reauthentication failed" or "could not automatically determine
+credentials" error:
 
 ```bash
-gcloud auth login                          # the CLI itself
-gcloud auth application-default login      # what Python's google-cloud-* libraries use
+gcloud auth login                          # CLI session credentials
+gcloud auth application-default login      # credentials read by the Python client libraries
 gcloud config set project <PROJECT_ID>
 ```
 
-To run as a specific IAM principal instead of your own user account (e.g. to test
-what a deployed function's service account can actually do):
+To operate as a specific IAM principal rather than the default user account -- for
+example, to verify the permissions available to a deployed function's runtime
+service account:
 
 ```bash
 gcloud config set account <SERVICE_ACCOUNT_EMAIL>
@@ -41,14 +36,14 @@ gcloud config set account <SERVICE_ACCOUNT_EMAIL>
 
 ## 2. Required IAM roles
 
-**For whoever runs the `gcloud` commands below** (a developer's own account, or a
-CI/CD service account):
+**Required for the principal executing the following `gcloud` commands** (a
+developer account or a CI/CD service account):
 
 | Role | Why |
 |---|---|
 | `roles/cloudfunctions.developer` | deploy/update Cloud Functions |
 | `roles/run.admin` | Gen2 functions deploy as Cloud Run services under the hood |
-| `roles/iam.serviceAccountUser` | deploy commands need to act as the function's runtime service account |
+| `roles/iam.serviceAccountUser` | required for deploy commands to impersonate the function's runtime service account |
 | `roles/storage.admin` | create buckets, read/write objects for manual testing |
 | `roles/datastore.user` | read/write Firestore documents for manual testing |
 
@@ -62,9 +57,9 @@ overrides it at deploy time):
 | `roles/datastore.user` | read/write Firestore documents |
 | `roles/datastore.viewer` | `live/export_firestore_to_gcs.py`'s `on_export_completed` looks up Firestore Admin API export operations (`datastore.operations.list`/`get`) to read which collection(s) a Console export was scoped to -- without this role that lookup fails closed and it falls back to exporting every dated collection |
 
-`roles/editor` on the project covers all of the above and is what CardCorp's actual
-deployment uses today -- fine for a single-project sandbox, more than a production
-deployment should grant.
+`roles/editor` on the project satisfies all requirements listed above and reflects
+CardCorp's current deployment; this scope is acceptable for a single-project
+sandbox but exceeds what a production deployment should grant.
 
 ## 3. Clone and install
 
@@ -95,7 +90,7 @@ own docstring for the full, authoritative list. The common ones:
 
 ## 5. Deploy: live pipeline
 
-Five Cloud Run functions (Gen2), one per stage. Run each from `live/`:
+Five Cloud Run functions (Gen2), one per stage. Execute each command from `live/`:
 
 ```bash
 cd live
@@ -141,10 +136,11 @@ gcloud functions deploy sync-paas-reconciled-to-digitalocean \
 
 ## 6. Deploy: production pipeline
 
-**Gotcha:** the Python Cloud Functions buildpack requires the entry-point file to be
-literally named `main.py` at the source root -- `staging_service.py` does not satisfy
-that as-is. Stage a small deploy directory with a one-line `main.py` that re-exports
-the real entry points, rather than renaming the actual source file:
+**Constraint:** the Python Cloud Functions buildpack requires the entry-point file
+to be named `main.py` at the source root; `staging_service.py` does not satisfy this
+requirement as written. Stage a deploy directory containing a one-line `main.py`
+that re-exports the required entry points, rather than renaming the source file
+itself:
 
 ```bash
 STAGE=$(mktemp -d)
@@ -170,12 +166,13 @@ gcloud functions deploy staging-on-firestore-write \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-**Onboarding a new merchant** does not need a redeploy at all -- drop a new
-`production/configs/<MERCHANT_ID>.json` (see `production/configs/cardcorp.json` for the
-shape) and is picked up on the next invocation, since the config is read fresh
-from disk each time rather than baked into the deployed image at build time.
+**Onboarding a new merchant does not require a redeployment.** Adding
+`production/configs/<MERCHANT_ID>.json` (see `production/configs/cardcorp.json` for
+the required schema) takes effect on the next invocation, since the configuration
+is read from disk at runtime rather than embedded in the deployed image at build
+time.
 
-## 7. Run manually / locally
+## 7. Manual and local execution
 
 ```bash
 # Live pipeline
@@ -195,7 +192,7 @@ GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> TRANSFORMED_BLOB_NAME="transform
 PRODUCTION_TEST_BUCKET=<TEST_BUCKET_NAME> python test_staging_service.py   # requires live GCP data, see the script's docstring
 ```
 
-## 8. Useful `gcloud` commands while debugging
+## 8. Reference commands for diagnostics
 
 ```bash
 # List deployed functions and their trigger type
