@@ -6,14 +6,14 @@ the rename/split rules from "Data Transformation_TokenMigration.xlsx" are
 applied in-memory (see column_mapping.py).
 
 Required environment variables:
-  GCS_BUCKET   e.g. cardcorp-token-0dc1f93138
+  GCS_BUCKET   e.g. <BUCKET_NAME>
 
 Optional:
   RAW_BLOB_NAME           default "raw/May 2025.csv"
   TRANSFORMED_BLOB_NAME   default "transformed/Transformed_May_2025.csv"
 
 Usage:
-  GCS_BUCKET=cardcorp-token-0dc1f93138 python transform_load_gcs.py
+  GCS_BUCKET=<BUCKET_NAME> python transform_load_gcs.py
 """
 
 from __future__ import annotations

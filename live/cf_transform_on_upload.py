@@ -17,7 +17,7 @@ month) -- this bucket sees at most a handful of uploads a month:
   gcloud functions deploy transform-on-raw-upload \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_raw_uploaded \\
-    --trigger-bucket=cardcorp-token-0dc1f93138 \\
+    --trigger-bucket=<BUCKET_NAME> \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 """
 

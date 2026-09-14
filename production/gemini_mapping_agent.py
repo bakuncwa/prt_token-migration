@@ -3,17 +3,18 @@ Shell-prompted step for onboarding a new merchant, per DESIGN.md's
 "staging & transform" verdict: a Gemini agent reads a declarative
 mapping config the same way it reads code, proposing a diff from a
 merchant's field list and sample rows rather than editing a proprietary
-Dataprep recipe an LLM (or a pull request) can't easily review.
+Dataprep recipe an LLM (or a pull request) cannot easily review.
 
-Placeholder: no live Gemini/Vertex AI API access is configured in this
-environment, and -- per open_decisions.py's "gemini_review_gate" item --
-the review gate itself (where the diff surfaces, who signs off) isn't
-decided yet. So this intentionally stops at *printing* a proposed
-config rather than writing configs/<merchant>.json directly: nothing
-should reach the live pipeline without a human approving it somewhere,
-and "somewhere" isn't built yet.
+Authenticates with GEMINI_API_KEY. Per open_decisions.py's
+"gemini_review_gate" item, the review gate itself (where the proposed
+diff surfaces, who signs off) is not yet decided; accordingly, this
+stops at *printing* the proposed config rather than writing
+configs/<merchant>.json directly -- nothing reaches the live pipeline
+without a human approving it somewhere, and "somewhere" is not built
+yet. That gate is a governance decision, independent of whether the
+Gemini call itself is live.
 
-Intended usage once wired up (Cloud Shell or local CLI):
+Usage (Cloud Shell or local CLI):
   python gemini_mapping_agent.py propose --merchant newmerchant \\
     --sample raw/newmerchant/sample.csv --target-schema card.id,card.number,...
 """
@@ -24,9 +25,13 @@ import argparse
 import json
 import sys
 
+import google.generativeai as genai
 import pandas as pd
 
+from merchant_config import env
 from open_decisions import require_resolved
+
+MODEL_NAME = "gemini-1.5-flash"
 
 
 def describe_fields(sample_df: pd.DataFrame, n: int = 5) -> dict:
@@ -39,18 +44,26 @@ def describe_fields(sample_df: pd.DataFrame, n: int = 5) -> dict:
 
 
 def propose_mapping_config(merchant: str, sample_df: pd.DataFrame, target_schema: list[str]) -> dict:
-    """Placeholder for the actual Gemini call. Replace the body with a
-    real prompt (field names + describe_fields() output + target_schema)
-    against the Gemini/Vertex AI API once access is configured -- the
-    response should be validated against configs/cardcorp.json's schema
-    shape before it's ever shown as a proposal, let alone approved.
-    """
-    raise SystemExit(
-        f"gemini_mapping_agent.py has no live Gemini API access configured -- "
-        f"can't propose a mapping for merchant {merchant!r} yet. "
-        f"Fields seen: {list(sample_df.columns)}. "
-        f"Target schema: {target_schema}."
+    """Prompts Gemini with the merchant's current field names, a sample
+    of real values per field (describe_fields()), and the target
+    schema, requesting a configs/<merchant>.json-shaped mapping (see
+    configs/cardcorp.json) as a JSON response. The response is parsed
+    and returned as a proposal only -- see this module's docstring for
+    why main() never writes it to disk automatically."""
+    genai.configure(api_key=env("GEMINI_API_KEY", required=True))
+    model = genai.GenerativeModel(MODEL_NAME)
+
+    prompt = (
+        "Propose a mapping config for the token migration staging service, "
+        "in the exact JSON shape used by configs/<merchant>.json (renames, "
+        "expansions with type copy_then_blank or split_date, repairs with "
+        "type zero_pad_if_length). Given these source fields and sample "
+        f"values: {json.dumps(describe_fields(sample_df))}. Target schema "
+        f"fields: {target_schema}. Respond with only the JSON config, no "
+        "surrounding prose."
     )
+    response = model.generate_content(prompt)
+    return json.loads(response.text)
 
 
 def main() -> None:

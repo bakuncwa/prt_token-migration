@@ -55,7 +55,7 @@ document.
 2. Execute the loader:
 
    ```
-   GCS_BUCKET=cardcorp-token-0dc1f93138 python3 load_to_firestore.py
+   GCS_BUCKET=<BUCKET_NAME> python3 load_to_firestore.py
    ```
 
 Inasmuch as documents are indexed by `card.id`, this procedure constitutes an

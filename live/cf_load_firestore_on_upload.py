@@ -28,7 +28,7 @@ month) -- this bucket sees at most a handful of uploads a month:
   gcloud functions deploy load-firestore-on-transformed-upload \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_transformed_uploaded \\
-    --trigger-bucket=cardcorp-token-0dc1f93138 \\
+    --trigger-bucket=<BUCKET_NAME> \\
     --set-env-vars=FIRESTORE_DATABASE="(default)" \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 """

@@ -49,13 +49,17 @@ OPEN_DECISIONS: list[dict] = [
     },
     {
         "id": "digitalocean_payreto_access",
-        "title": "DigitalOcean Kubernetes API access for Payreto",
+        "title": "DigitalOcean Kubernetes API credentials for Payreto",
         "status": "unresolved",
         "detail": (
-            "Both the live pipeline's extract_digitalocean.py/deploy_digitalocean.py "
-            "and the production pipeline's extraction_adapters.py/sink_adapters.py are "
-            "placeholders on the DigitalOcean leg -- no live read or write credentials "
-            "are configured in this environment. Nothing on the GCS/Firestore side of "
+            "production/extraction_adapters.py and production/sink_adapters.py call the "
+            "DigitalOcean Kubernetes API directly (see _extract_via_cloud_run_puller() and "
+            "_sync_to_digitalocean_kubernetes()); each requires <MERCHANT>_SOURCE_TOKEN, "
+            "<MERCHANT>_SOURCE_CLUSTER, DIGITALOCEAN_TOKEN, and <MERCHANT>_DO_CLUSTER_NAME "
+            "to be set in the deployment environment for Payreto's DigitalOcean-hosted MIT "
+            "database (https://www.payreto.com/about-us/). The live pipeline's "
+            "extract_digitalocean.py and deploy_digitalocean.py remain unimplemented "
+            "placeholders on the DigitalOcean leg. Nothing on the GCS/Firestore side of "
             "either pipeline is blocked by this; only the two ends that touch DigitalOcean are."
         ),
         "resolution": None,

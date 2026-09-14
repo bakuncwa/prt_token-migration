@@ -48,7 +48,7 @@ Always Free tier:
   gcloud functions deploy sync-paas-reconciled-to-digitalocean \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_paas_reconciled \\
-    --trigger-bucket=cardcorp-token-0dc1f93138 \\
+    --trigger-bucket=<BUCKET_NAME> \\
     --set-env-vars=DO_CLUSTER_NAME=... \\
     --set-secrets=DIGITALOCEAN_TOKEN=digitalocean-token:latest \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3

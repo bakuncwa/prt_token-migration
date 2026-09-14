@@ -46,13 +46,11 @@ large language model agent, nor to review within the context of a pull
 request; furthermore, Google's continued investment in Dataprep has
 demonstrably diminished in recent years.
 
-## Reconciliation Store: Firestore Versus SQL
+## Reconciliation Store: Firestore
 
-**Verdict:** Firestore should remain the default reconciliation store
-(`store_adapters.py`, `firestore`), namespaced per merchant and per period
-(`<merchant>_MMYYYY_<prefix>`). A SQL-backed store (`sql`) should remain an
-explicit, unimplemented placeholder pending a specific merchant's requirement
-for relational joins or reporting capabilities that Firestore cannot provide.
+**Verdict:** Firestore is the reconciliation store (`store_adapters.py`,
+`firestore`), namespaced per merchant and per period
+(`<merchant>_MMYYYY_<prefix>`).
 
 The reconciliation procedure constitutes, in its entirety, a single-field
 lookup by key, subject to human editing through a graphical interface --

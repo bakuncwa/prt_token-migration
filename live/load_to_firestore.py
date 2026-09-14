@@ -29,7 +29,7 @@ export_firestore_to_gcs.py, by reading the transformed CSV fresh and
 merging in the card.number Firestore has for each card.id.
 
 Required environment variables:
-  GCS_BUCKET     e.g. cardcorp-token-0dc1f93138
+  GCS_BUCKET     e.g. <BUCKET_NAME>
 
 Optional:
   TRANSFORMED_BLOB_NAME  default "transformed/Transformed_May_2025.csv"

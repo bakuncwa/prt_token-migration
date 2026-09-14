@@ -1,13 +1,14 @@
 # Google Cloud Card Token Migration Pipeline for PCI-Compliant Merchant Initiated Transaction (MIT) Data & Reconciliation
 
-This repository documents a Payment Card Industry (PCI) Data Security
-Standard-scoped Extract, Transform, Load (ETL) pipeline engineered to effect the
-migration of card-on-file data from a DigitalOcean-hosted Merchant Initiated
-Transaction (MIT) database to a newly provisioned token vault. The architecture
-employs Google Cloud Storage as an intermediate staging layer and Google Cloud
-Firestore as a narrowly scoped, single-purpose reconciliation layer, the latter
-reserved exclusively for the one field that cannot be populated through
-automation: the newly issued card number, i.e., the Primary Account Number (PAN).
+This repository documents a Payment Card Industry Data Security Standard
+(PCI DSS)[^pci]-scoped Extract, Transform, Load (ETL) pipeline engineered to
+effect the migration of card-on-file data from a DigitalOcean-hosted Merchant
+Initiated Transaction (MIT) database to a newly provisioned token vault. The
+architecture employs Google Cloud Storage as an intermediate staging layer and
+Google Cloud Firestore as a narrowly scoped, single-purpose reconciliation
+layer, the latter reserved exclusively for the one field that cannot be
+populated through automation: the newly issued card number, i.e., the Primary
+Account Number (PAN).
 
 ## Index
 
@@ -125,7 +126,7 @@ through the Firestore reconciliation procedure described above.
 
 All functions are deployed as Cloud Run functions (Generation 2 Cloud Functions),
 under project `cardcorp-token-migration`, region `europe-west2`, bucket
-`cardcorp-token-0dc1f93138`:
+`<BUCKET_NAME>`:
 
 | Function | Entry point | Trigger |
 |---|---|---|
@@ -175,8 +176,8 @@ retrieved the underlying data.
 |---|---|---|
 | Extraction | scheduled Cloud Run puller | Dataflow (for merchants whose data volume necessitates it) |
 | Mapping authorship | Gemini agent proposes `configs/<merchant>.json` from representative sample data, subject to human approval | -- |
-| Reconciliation store | Firestore, one field per document | SQL (for merchants requiring relational joins or reporting capability) |
-| Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto | any merchant-specific target system |
+| Reconciliation store | Firestore, one field per document | -- |
+| Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto[^payreto] | any merchant-specific target system |
 
 The complete rationale underlying each default is documented in
 [`production/DESIGN.md`](production/DESIGN.md).
@@ -191,10 +192,13 @@ than as implicit assumption: see
    persisting it under any circumstance until a formal review gate has been
    established; the module raises an exception rather than presuming an
    unreviewed proposal to be trustworthy.
-2. **DigitalOcean access for Payreto** -- unresolved. Both the `live/` and
-   `production/` DigitalOcean-facing components (extraction and sink) remain
-   placeholders; neither pipeline's GCS/Firestore-facing components are
-   obstructed by this limitation.
+2. **DigitalOcean credentials for Payreto** -- unresolved. `production/`'s
+   extraction and sink adapters call the DigitalOcean Kubernetes API directly
+   and require `<MERCHANT>_SOURCE_TOKEN`, `<MERCHANT>_SOURCE_CLUSTER`,
+   `DIGITALOCEAN_TOKEN`, and `<MERCHANT>_DO_CLUSTER_NAME` to be present in the
+   deployment environment; `live/`'s equivalent components remain
+   unimplemented placeholders. Neither pipeline's GCS/Firestore-facing
+   components are obstructed by this limitation.
 3. **Test strategy** -- resolved. See the following subsection.
 
 ### Test Results
@@ -237,35 +241,34 @@ For adoption decisions evaluated on a per-merchant basis, the pluggable
 architecture of `production/` ties operating expenditure to the adapters
 selected by a given merchant, rather than to the codebase itself. Every
 merchant operating on the default configuration path (Cloud Run puller,
-Firestore, absent Dataflow, absent SQL) incurs a cost approximately equivalent
-to that incurred by the live pipeline at present. Dataflow and Cloud SQL
-constitute the two cost components that shift the operating expenditure from a
-near-zero basis to a material recurring monthly expense; both remain optional
-selections exercised on a per-merchant basis, rather than being imposed
-pipeline-wide.
+Firestore, absent Dataflow) incurs a cost approximately equivalent to that
+incurred by the live pipeline at present. Dataflow constitutes the sole cost
+component that shifts the operating expenditure from a near-zero basis toward
+a material recurring expense, and remains an optional selection exercised on
+a per-merchant basis, rather than being imposed pipeline-wide.
 
 The live pipeline's empirically measured usage volume -- 2,275 records across
 16 monthly Firestore collections, several dozen function invocations per month,
 and substantially under 100 MB of aggregate CSV storage -- is employed below as
 the baseline for estimation, in preference to an assumed or hypothetical volume.
 
-| Cost driver | Live (CardCorp, measured) | Production, default path (per merchant, equivalent volume) | Production, with Dataflow and Cloud SQL selected (per merchant) |
+| Cost driver | Live (CardCorp, measured) | Production, default path (per merchant, equivalent volume) | Production, with Dataflow selected (per merchant) |
 |---|---|---|---|
 | Compute (Cloud Run functions) | \$0.00 -- several dozen invocations per month, evaluated against a free tier of 2,000,000 requests, 180,000 vCPU-seconds, and 360,000 GiB-seconds per month | \$0.00 -- the free tier applies at the project level rather than per merchant; several dozen invocations per merchant per month remains substantially under the shared threshold across dozens of merchants | Equivalent to the default path |
-| Reconciliation store | \$0.00 -- 2,275 documents (tens of kilobytes) evaluated against a daily free tier of 1 GiB stored, 50,000 reads, 20,000 writes, and 20,000 deletes | \$0.00 at a comparable per-merchant volume -- an estimated 20 or more merchants could each execute a complete dataset re-read on a single day prior to the shared daily read quota being exhausted | + Cloud SQL: no free tier applies. The smallest shared-core instance (equivalent to `db-f1-micro`) incurs approximately \$7-\$10 per month in compute alone, exclusive of storage, backup, and network charges -- a fixed cost per merchant electing this option, independent of actual usage |
+| Reconciliation store | \$0.00 -- 2,275 documents (tens of kilobytes) evaluated against a daily free tier of 1 GiB stored, 50,000 reads, 20,000 writes, and 20,000 deletes | \$0.00 at a comparable per-merchant volume -- an estimated 20 or more merchants could each execute a complete dataset re-read on a single day prior to the shared daily read quota being exhausted | Equivalent to the default path |
 | Extraction | included above | included above | + Dataflow: no free tier applies. A single small worker (1 vCPU, 3.75 GiB) executing a 10-minute monthly batch operation incurs approximately \$0.056 per vCPU-hour x 0.167 hour, plus \$0.003557 per GiB-hour x 3.75 GiB x 0.167 hour, yielding approximately \$0.01-\$0.02 per execution -- the compute expenditure itself is negligible; the material expenditure arises from operating a second execution substrate at all |
 | Mapping authorship | manual; developer time exclusively | Gemini agent, flash-tier pricing (\$0.30 per 1M input tokens, \$2.50 per 1M output tokens): a single onboarding invocation of approximately 5,000 input and 1,000 output tokens incurs a cost of approximately \$0.004, executed once per merchant onboarding event | Equivalent |
 | CI/CD | manual `gcloud functions deploy` invocation | Cloud Build, within the 120 free build-minutes per day (e2-standard-2) at the present deployment frequency | Equivalent |
 | Storage (GCS) | approximately \$0.002 per month (substantially under 100 MB, at \$0.020 per GB per month) | scales linearly with merchant count, at the equivalent per-merchant rate | Equivalent |
-| **Estimated monthly total** | **approximately \$0.00** | **approximately \$0.00 per merchant**, until dozens of merchants have been onboarded | **approximately \$7-\$10 per month per merchant electing Cloud SQL**, in addition to several cents per merchant per month for Dataflow |
+| **Estimated monthly total** | **approximately \$0.00** | **approximately \$0.00 per merchant**, until dozens of merchants have been onboarded | **approximately \$0.00 per merchant**, plus several cents per merchant per month for Dataflow |
 
 **Recommendation for adoption:** every newly onboarded merchant should default to
-the low-cost configuration path; Dataflow or Cloud SQL should be approved for a
-given merchant exclusively where data volume or downstream reporting
-requirements genuinely necessitate it, consistent with the verdicts documented
-in `production/DESIGN.md`. This practice maintains the marginal cost of
-onboarding merchant *N+1* at a near-zero basis, unless that merchant possesses a
-specific requirement for the higher-cost adapters.
+the low-cost configuration path; Dataflow should be approved for a given
+merchant exclusively where data volume or throughput requirements genuinely
+necessitate it, consistent with the verdicts documented in
+`production/DESIGN.md`. This practice maintains the marginal cost of onboarding
+merchant *N+1* at a near-zero basis, unless that merchant possesses a specific
+requirement for Dataflow's autoscaling extraction.
 
 The figures presented above employ published Google Cloud list pricing as of
 the time of writing, applied to this project's own empirically measured usage;
@@ -279,7 +282,6 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 [Firestore pricing](https://cloud.google.com/firestore/pricing),
 [Cloud Storage pricing](https://cloud.google.com/storage/pricing),
 [Dataflow pricing](https://cloud.google.com/dataflow/pricing),
-[Cloud SQL pricing](https://cloud.google.com/sql/pricing),
 [Cloud Build pricing](https://cloud.google.com/build/pricing),
 [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
@@ -297,8 +299,14 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 - Engineered a config-driven, multi-merchant extension of the pipeline
   (`production/`), packaged as a product for scalability and reuse across
   merchants without modifying pipeline code -- built on Cloud Run, Firestore,
-  and Cloud Storage, with pluggable Dataflow and Cloud SQL adapters and
-  Gemini-assisted mapping-config authoring invoked via Cloud Shell/CLI,
-  validated against live production data.
+  and Cloud Storage, with Dataflow (Apache Beam) for autoscaled, high-volume
+  extraction, Cloud Build CI/CD, and Gemini-assisted mapping-config authoring
+  invoked via Cloud Shell/CLI, validated against live production data.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
+
+[^pci]: PCI Security Standards Council, *Payment Card Industry Data Security
+    Standard*, v4.0.1. https://www.pcisecuritystandards.org/standards/pci-dss/.
+
+[^payreto]: Payreto Services Inc., payment service provider and financial
+    outsourcing operator. https://www.payreto.com/about-us/.

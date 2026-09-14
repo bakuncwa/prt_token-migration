@@ -30,7 +30,7 @@ project cardcorp-token-migration. Check 2 does not and can run on its
 own, offline, at any time.
 
 Usage:
-  PRODUCTION_TEST_BUCKET=cardcorp-token-migration-production-test \\
+  LIVE_BUCKET=<BUCKET_NAME> PRODUCTION_TEST_BUCKET=cardcorp-token-migration-production-test \\
     python test_staging_service.py
 """
 
@@ -46,7 +46,6 @@ from google.cloud import firestore, storage
 from merchant_config import env, load_merchant_config
 from staging_service import download_csv, reconcile_dataframe, run_reconcile, run_transform, transform_dataframe
 
-LIVE_BUCKET = "cardcorp-token-0dc1f93138"
 LIVE_PROJECT = "cardcorp-token-migration"
 
 
@@ -55,7 +54,7 @@ def test_transform_matches_live() -> None:
     from column_mapping import transform_dataframe as live_transform  # live/
 
     client = storage.Client(project=LIVE_PROJECT)
-    bucket = client.bucket(LIVE_BUCKET)
+    bucket = client.bucket(env("LIVE_BUCKET", required=True))
     raw_df = download_csv(bucket, "raw/January 2026.csv")
 
     config = load_merchant_config("cardcorp")
@@ -105,7 +104,7 @@ def test_reconcile_matches_live() -> None:
     from export_firestore_to_gcs import merge_card_numbers  # live/
 
     client = storage.Client(project=LIVE_PROJECT)
-    bucket = client.bucket(LIVE_BUCKET)
+    bucket = client.bucket(env("LIVE_BUCKET", required=True))
     transformed_df = download_csv(bucket, "transformed/Transformed_January_2026.csv")
 
     db = firestore.Client(project=LIVE_PROJECT, database="(default)")
@@ -126,7 +125,7 @@ def test_end_to_end_on_test_bucket() -> None:
     test_bucket = env("PRODUCTION_TEST_BUCKET", required=True)
 
     client = storage.Client(project=LIVE_PROJECT)
-    src_bucket = client.bucket(LIVE_BUCKET)
+    src_bucket = client.bucket(env("LIVE_BUCKET", required=True))
     dst_bucket = client.bucket(test_bucket)
 
     raw_blob = src_bucket.blob("raw/January 2026.csv")

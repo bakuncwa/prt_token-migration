@@ -17,7 +17,7 @@ any other process) uploads a new raw CSV there.
 Required environment variables:
   DIGITALOCEAN_TOKEN   DO API token (scope: read)
   DO_CLUSTER_NAME       DOKS cluster name or ID fronting the MIT Database
-  GCS_BUCKET            e.g. cardcorp-token-0dc1f93138
+  GCS_BUCKET            e.g. <BUCKET_NAME>
 
 Optional:
   RAW_BLOB_NAME   default "raw/<Month YYYY>.csv"

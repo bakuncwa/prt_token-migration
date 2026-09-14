@@ -54,7 +54,7 @@ cannot contain any field other than card.number, so there's nothing
 else for a PaaS worker to see or tamper with in the first place.
 
 Required environment variables:
-  GCS_BUCKET   e.g. cardcorp-token-0dc1f93138
+  GCS_BUCKET   e.g. <BUCKET_NAME>
 
 Optional:
   TRANSFORMED_BLOB_NAME   default "transformed/Transformed_May_2025.csv" (source of truth)
@@ -64,7 +64,7 @@ Optional:
   FIRESTORE_DATABASE      default "(default)"
 
 Manual usage:
-  GCS_BUCKET=cardcorp-token-0dc1f93138 python export_firestore_to_gcs.py
+  GCS_BUCKET=<BUCKET_NAME> python export_firestore_to_gcs.py
 
 Deploy both Cloud Functions (2nd gen, from the scripts/ directory).
 --min-instances=0 and a low --max-instances cap keep both inside the
@@ -78,7 +78,7 @@ above, in addition to whatever it already needs to read Firestore:
   gcloud functions deploy export-on-firestore-export-button \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_export_completed \\
-    --trigger-bucket=cardcorp-token-0dc1f93138 \\
+    --trigger-bucket=<BUCKET_NAME> \\
     --set-env-vars=FIRESTORE_DATABASE="(default)" \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
@@ -94,7 +94,7 @@ fixed month -- writes to other collections are ignored in code:
     --trigger-event-filters="database=(default)" \\
     --trigger-event-filters-path-pattern="document={collection}/{docId}" \\
     --trigger-location=europe-west2 \\
-    --set-env-vars=GCS_BUCKET=cardcorp-token-0dc1f93138,FIRESTORE_DATABASE="(default)" \\
+    --set-env-vars=GCS_BUCKET=<BUCKET_NAME>,FIRESTORE_DATABASE="(default)" \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 """
 
