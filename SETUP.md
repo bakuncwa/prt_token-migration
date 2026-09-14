@@ -153,9 +153,12 @@ requisite entry points, rather than renaming the source file itself:
 ```bash
 STAGE=$(mktemp -d)
 cp production/staging_service.py production/merchant_config.py production/store_adapters.py \
-   production/requirements.txt "$STAGE/"
+   production/sink_adapters.py production/requirements.txt "$STAGE/"
 cp -r production/configs "$STAGE/"
-echo 'from staging_service import on_raw_uploaded, on_firestore_write  # noqa: F401' > "$STAGE/main.py"
+{
+  echo 'from staging_service import on_raw_uploaded, on_firestore_write  # noqa: F401'
+  echo 'from sink_adapters import on_cleaned_uploaded  # noqa: F401'
+} > "$STAGE/main.py"
 
 gcloud functions deploy staging-on-raw-upload \
   --gen2 --runtime=python312 --region=<REGION> \
@@ -172,13 +175,33 @@ gcloud functions deploy staging-on-firestore-write \
   --trigger-location=<REGION> \
   --set-env-vars=GCS_BUCKET=<BUCKET_NAME>,FIRESTORE_DATABASE="(default)" \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
+
+gcloud functions deploy staging-on-cleaned-upload \
+  --gen2 --runtime=python312 --region=<REGION> \
+  --source="$STAGE" --entry-point=on_cleaned_uploaded \
+  --trigger-bucket=<BUCKET_NAME> \
+  --set-secrets=DIGITALOCEAN_TOKEN=<SECRET_NAME>:latest \
+  --set-env-vars=<MERCHANT>_DO_CLUSTER_NAME=<DO_CLUSTER_NAME> \
+  --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
 
-**The onboarding of a new merchant does not necessitate a redeployment.** The
-addition of `production/configs/<MERCHANT_ID>.json` (see
+The third function, `staging-on-cleaned-upload`, mirrors the live pipeline's
+`sync-paas-reconciled-to-digitalocean` (see Step 5 above), generalized to any
+merchant whose `configs/<merchant>.json` declares `"sink_adapter":
+"digitalocean_kubernetes"`: it fires on the identical `cleaned/` GCS finalize
+event that `on_firestore_write` produces, and requires one
+`<MERCHANT>_DO_CLUSTER_NAME` environment variable per such merchant onboarded,
+in addition to the shared `DIGITALOCEAN_TOKEN` secret.
+
+**The onboarding of a new merchant does not necessitate a redeployment,**
+unless that merchant is the first to select a given sink adapter's required
+credential. The addition of `production/configs/<MERCHANT_ID>.json` (see
 `production/configs/cardcorp.json` for the requisite schema) takes effect upon
 the subsequent invocation, inasmuch as the configuration is read from disk at
-runtime rather than embedded within the deployed image at build time.
+runtime rather than embedded within the deployed image at build time; a
+merchant selecting `digitalocean_kubernetes` as its sink does, however,
+require `staging-on-cleaned-upload` to be redeployed with that merchant's
+`<MERCHANT>_DO_CLUSTER_NAME` variable added.
 
 ## 7. Manual and Local Execution Procedures
 

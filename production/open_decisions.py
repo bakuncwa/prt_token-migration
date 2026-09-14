@@ -64,11 +64,15 @@ OPEN_DECISIONS: list[dict] = [
             "_sync_to_digitalocean_kubernetes()); each requires <MERCHANT>_SOURCE_TOKEN, "
             "<MERCHANT>_SOURCE_CLUSTER, DIGITALOCEAN_TOKEN, and <MERCHANT>_DO_CLUSTER_NAME "
             "to be present within the deployment environment, for Payreto's "
-            "DigitalOcean-hosted MIT database (https://www.payreto.com/about-us/). The live "
-            "pipeline's extract_digitalocean.py and deploy_digitalocean.py remain "
-            "unimplemented placeholders on the DigitalOcean leg. Neither pipeline's "
-            "GCS/Firestore-facing components are obstructed by this limitation; only the "
-            "two components that interface with DigitalOcean are."
+            "DigitalOcean-hosted MIT database (https://www.payreto.com/about-us/). The "
+            "Cloud Run wiring itself is in place -- sink_adapters.py:on_cleaned_uploaded is "
+            "deployable as staging-on-cleaned-upload (see SETUP.md Step 6), triggered by the "
+            "identical cleaned/ GCS finalize event that on_firestore_write produces -- so "
+            "this decision now blocks exclusively on the credentials themselves, not on "
+            "absent Cloud Run scaffolding. The live pipeline's extract_digitalocean.py and "
+            "deploy_digitalocean.py remain unimplemented placeholders on the DigitalOcean "
+            "leg. Neither pipeline's GCS/Firestore-facing components are obstructed by this "
+            "limitation; only the two components that interface with DigitalOcean are."
         ),
         "resolution": None,
     },

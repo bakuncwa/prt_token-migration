@@ -1,4 +1,4 @@
-# Google Cloud Card Token Migration Pipeline for PCI-Compliant Merchant Initiated Transaction (MIT) Data & Reconciliation
+# Card Token Migration Pipeline for PCI DSS-Compliant MIT Data & Reconciliation
 
 This repository documents a Payment Card Industry Data Security Standard
 (PCI DSS)[^pci]-scoped Extract, Transform, Load (ETL) pipeline engineered to
@@ -23,14 +23,30 @@ Account Number (PAN).
   comprising authentication procedures, requisite IAM roles, environment
   variables, and the precise `gcloud` commands required to deploy and diagnose
   both implementations.
-- **IV.** [Architecture (live pipeline)](#architecture-live-pipeline)
-- **V.** [Firestore scope: rationale for restriction to `card.number`](#firestore-scope-rationale-for-restriction-to-cardnumber)
-- **VI.** [Pipeline stages (live)](#pipeline-stages-live)
-- **VII.** [Column mapping (live)](#column-mapping-live)
-- **VIII.** [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
-- **IX.** [Production version](#production-version)
-- **X.** [Cost comparison](#cost-comparison)
-- **XI.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
+- **IV.** [Technology stack](#technology-stack)
+- **V.** [Architecture (live pipeline)](#architecture-live-pipeline)
+- **VI.** [Firestore scope: rationale for restriction to `card.number`](#firestore-scope-rationale-for-restriction-to-cardnumber)
+- **VII.** [Pipeline stages (live)](#pipeline-stages-live)
+- **VIII.** [Column mapping (live)](#column-mapping-live)
+- **IX.** [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
+- **X.** [Production version](#production-version)
+- **XI.** [Cost comparison](#cost-comparison)
+- **XII.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
+- **XIII.** [References](#references)
+
+## Technology stack
+
+| Layer | Technology | Role within this repository |
+|---|---|---|
+| Compute | Google Cloud Run functions (Generation 2), Eventarc | Every pipeline stage subsequent to extraction; triggered by GCS finalize and Firestore write events, in both `live/` and `production/` |
+| Staging storage | Google Cloud Storage (GCS) | `raw/`, `transformed/`, and `cleaned/` prefixes -- the intermediate staging layer between the source MIT database and the token vault |
+| Reconciliation store | Google Cloud Firestore | Narrowly scoped, single-field (`card.number`) manual reconciliation layer, namespaced per month (live) or per merchant and month (production) |
+| Source / sink system | DigitalOcean Kubernetes API | The DigitalOcean-hosted Merchant Initiated Transaction (MIT) database, both read (extraction) and written (post-reconciliation synchronization) |
+| Extraction (optional, high-volume) | Google Cloud Dataflow (Apache Beam) | Pluggable `production/extraction_adapters.py` adapter, selected per merchant in place of the default scheduled Cloud Run puller |
+| Mapping-config authoring | Google Gemini API | `production/gemini_mapping_agent.py` proposes `configs/<merchant>.json` from representative sample data, subject to human review |
+| CI/CD | Google Cloud Build | Automated deployment of Cloud Run functions on push, within the free build-minutes tier |
+| Language / runtime | Python 3.12, pandas, Functions Framework | Shared implementation language across every stage of both the live and production pipelines |
+| Tooling | Cloud Shell, `gcloud` CLI, `doctl`, `kubectl` | Deployment, diagnostics, and DigitalOcean Kubernetes cluster operations (see [`SETUP.md`](SETUP.md)) |
 
 ## Architecture (live pipeline)
 
@@ -42,7 +58,7 @@ DigitalOcean MIT DB --{GET}--> GCS raw/ --transform--> GCS transformed/
                                                               v
                                                    Firestore (card.number only)
                                                               |
-                                        PaaS worker enters card.number manually
+                              PaaS (Payments as a Service) worker enters card.number manually
                                                               |
                                                               v
                                     GCS transformed/ + Firestore --merge--> GCS cleaned/
@@ -159,6 +175,26 @@ Firestore's function within the architecture remains unaltered: it retains
 responsibility for exactly one field, remains editable exclusively through its
 own Console interface, and is now namespaced by merchant in addition to month
 (`<merchant>_MMYYYY_cardholders`).
+
+**Deployment triggers mirror the live pipeline exactly:** `production/` is
+deployed as its own set of Cloud Run functions, each triggered by the
+identical event class as its live-pipeline counterpart -- a GCS finalize event
+upon upload to `raw/`, a Firestore document-write event upon manual
+reconciliation, and a GCS finalize event upon the resulting write to
+`cleaned/`, which in turn automates the synchronization of the reconciled
+dataset back to DigitalOcean, generalizing the live pipeline's
+`sync-paas-reconciled-to-digitalocean`:
+
+| Function | Entry point | Trigger |
+|---|---|---|
+| `staging-on-raw-upload` | `on_raw_uploaded` | GCS finalize, bucket-wide (monitors `raw/<merchant>/*.csv`) |
+| `staging-on-firestore-write` | `on_firestore_write` | Firestore document write operation, applicable to any `<merchant>_MMYYYY_<prefix>` collection |
+| `staging-on-cleaned-upload` | `on_cleaned_uploaded` | GCS finalize, bucket-wide (monitors `cleaned/<merchant>/*.csv`); dispatches to the merchant's configured `sink_adapter`, e.g. DigitalOcean Kubernetes |
+
+See [`production/sink_adapters.py`](production/sink_adapters.py) for
+`on_cleaned_uploaded`'s implementation and
+[`SETUP.md`](SETUP.md#6-deployment-procedure-production-pipeline) for the
+exact `gcloud functions deploy` commands.
 
 **PCI scoping is extended to the extraction boundary:** within a production
 deployment, a source system such as DigitalOcean's MIT database is expected to
@@ -287,24 +323,25 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 
 ## Key Technical Contributions & Impact
 
-- Spearheaded engineering modular 4-party payment model ETL pipelines via SFTP file
-  transfer client migrations to the Revolut Bank acquirer API gateway.
-- Architected Google Cloud Run functions via Eventarc for PCI-compliant card token
-  migration, automating merchant-initiated transaction (MIT) PAN data cleaning and
-  bidirectional DigitalOcean Kubernetes API synchronization.
-- Automated Google Cloud Storage (GCS) bucket-to-staging-layer transformation into
-  Firestore NoSQL database on upload for secure reconciliation without PII leakage
-  -- validated across 2,275 production records spanning 16 monthly cycles with zero
-  pipeline errors.
-- Engineered a modular, config-driven, multi-merchant pipeline extension
-  (`production/`) for Payments-as-a-Service reuse across merchants without
-  modifying pipeline code -- architected on Cloud Run, Firestore, and Cloud
-  Storage, with a pluggable Dataflow (Apache Beam) extraction adapter for
-  autoscaled, high-volume onboarding, Cloud Build CI/CD, and Cloud
-  Shell/CLI-invoked, Gemini-assisted mapping-config authoring, packaged for
-  rapid, low-code merchant onboarding at scale.
+- Spearheaded engineering modular 4-party payment model ETL pipelines via SFTP
+  file transfer client migrations to the Revolut Bank acquirer API gateway.
+- Architected Google Cloud Run functions via Eventarc for PCI-compliant card
+  token migration, automating merchant-initiated transaction (MIT) PAN data
+  cleaning and bidirectional DigitalOcean Kubernetes API synchronization.
+  Reengineered to package a modular, config-driven, multi-merchant pipeline
+  extension (`production/`) for Payments-as-a-Service reuse across MIT data
+  -- architected on Cloud Run, Firestore, and Cloud Storage, with a pluggable
+  Dataflow (Apache Beam) extraction adapter for autoscaled, high-volume
+  onboarding, Cloud Build CI/CD, and Cloud Shell/CLI-invoked, Gemini-assisted
+  mapping-config authoring.
+- Automated Google Cloud Storage (GCS) bucket-to-staging-layer transformation
+  into Firestore NoSQL database on upload for secure reconciliation without
+  PII leakage -- validated across 2,275 production records spanning 16
+  monthly cycles with zero pipeline errors.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
+
+## References
 
 [^pci]: PCI Security Standards Council, *Payment Card Industry Data Security
     Standard*, v4.0.1. https://www.pcisecuritystandards.org/standards/pci-dss/.
