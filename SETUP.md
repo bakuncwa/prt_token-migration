@@ -89,15 +89,18 @@ are enumerated below:
 |---|---|---|
 | `GCS_BUCKET` | both pipelines | `<BUCKET_NAME>` |
 | `FIRESTORE_DATABASE` | both pipelines | `(default)` |
-| `MERCHANT` | production only | `<MERCHANT_ID>`, e.g. `cardcorp` |
+| `MERCHANT` | production only | `<MERCHANT_ID>`, e.g. `pilot` |
 | `TRANSFORMED_BLOB_NAME` | manual/CLI runs | `transformed/Transformed_<Month>_<Year>.csv` |
 | `RAW_BLOB_NAME` | manual/CLI runs | `raw/<Month Year>.csv` (live) / `raw/<MERCHANT_ID>/<Month Year>.csv` (production) |
 | `DIGITALOCEAN_TOKEN`, `DO_CLUSTER_NAME` | DigitalOcean legs (placeholders until access is granted) | -- |
 
 ## 5. Deployment Procedure: Live Pipeline
 
-This procedure deploys five Generation 2 Cloud Run functions, one per pipeline
-stage. Each command below must be executed from within the `live/` directory:
+This procedure deploys six Generation 2 Cloud Run functions: one per pipeline
+stage, plus a sixth that replicates newly uploaded raw data into the
+production pipeline's dedicated bucket (see Step 6) for the reference
+merchant. Each command below must be executed from within the `live/`
+directory:
 
 ```bash
 cd live
@@ -139,7 +142,21 @@ gcloud functions deploy sync-paas-reconciled-to-digitalocean \
   --set-secrets=DIGITALOCEAN_TOKEN=<SECRET_NAME>:latest \
   --set-env-vars=DO_CLUSTER_NAME=<DO_CLUSTER_NAME> \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
+
+gcloud functions deploy replicate-raw-to-production \
+  --gen2 --runtime=python312 --region=<REGION> \
+  --source=. --entry-point=on_raw_uploaded_replicate \
+  --trigger-bucket=<BUCKET_NAME> \
+  --set-env-vars=PRODUCTION_BUCKET=<PRODUCTION_BUCKET_NAME>,PRODUCTION_MERCHANT=pilot \
+  --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 ```
+
+`replicate-raw-to-production` (`live/replicate_raw_to_production.py`) mirrors
+each newly uploaded `raw/*.csv` object into
+`gs://<PRODUCTION_BUCKET_NAME>/raw/pilot/`, so that the reference merchant
+(`configs/pilot.json`, see Step 6) continues to exercise the production
+pipeline's generalized `staging_service.py` against authentic data, without
+requiring a merchant subfolder to ever exist within the live bucket itself.
 
 ## 6. Deployment Procedure: Production Pipeline
 
@@ -196,7 +213,7 @@ in addition to the shared `DIGITALOCEAN_TOKEN` secret.
 **The onboarding of a new merchant does not necessitate a redeployment,**
 unless that merchant is the first to select a given sink adapter's required
 credential. The addition of `production/configs/<MERCHANT_ID>.json` (see
-`production/configs/cardcorp.json` for the requisite schema) takes effect upon
+`production/configs/pilot.json` for the requisite schema) takes effect upon
 the subsequent invocation, inasmuch as the configuration is read from disk at
 runtime rather than embedded within the deployed image at build time; a
 merchant selecting `digitalocean_kubernetes` as its sink does, however,

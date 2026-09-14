@@ -151,6 +151,7 @@ under project `cardcorp-token-migration`, region `europe-west2`, bucket
 | `export-on-firestore-export-button` | `on_export_completed` | GCS finalize, bucket-wide (monitors for Firestore's export completion marker under `cleaned/`) |
 | `export-on-firestore-write` | `on_firestore_write` | Firestore document write operation, applicable to any `MMYYYY_cardholders` collection |
 | `sync-paas-reconciled-to-digitalocean` | `on_paas_reconciled` | GCS finalize, bucket-wide (monitors `cleaned/*.csv`) |
+| `replicate-raw-to-production` | `on_raw_uploaded_replicate` | GCS finalize, bucket-wide (monitors `raw/*.csv`); mirrors each object into the production pipeline's dedicated bucket, under `raw/pilot/`, so the reference merchant continues to exercise `production/`'s generalized staging service against authentic data |
 
 The precise `gcloud functions deploy` command for each function is documented
 within that function's own module docstring; a placeholder-parameterized,
@@ -190,6 +191,14 @@ dataset back to DigitalOcean, generalizing the live pipeline's
 | `staging-on-raw-upload` | `on_raw_uploaded` | GCS finalize, bucket-wide (monitors `raw/<merchant>/*.csv`) |
 | `staging-on-firestore-write` | `on_firestore_write` | Firestore document write operation, applicable to any `<merchant>_MMYYYY_<prefix>` collection |
 | `staging-on-cleaned-upload` | `on_cleaned_uploaded` | GCS finalize, bucket-wide (monitors `cleaned/<merchant>/*.csv`); dispatches to the merchant's configured `sink_adapter`, e.g. DigitalOcean Kubernetes |
+
+`production/` is deployed against its own dedicated GCS bucket, distinct from
+the live pipeline's, so that its merchant-namespaced `raw/<merchant>/` layout
+can never collide with the live bucket's flat, bucket-wide `raw/` trigger.
+The reference merchant (`configs/pilot.json`) is kept populated with authentic
+data via `replicate-raw-to-production` (see [Deployed Cloud Run functions
+(live)](#deployed-cloud-run-functions-live)), rather than by writing into the
+live bucket's own `raw/` prefix.
 
 See [`production/sink_adapters.py`](production/sink_adapters.py) for
 `on_cleaned_uploaded`'s implementation and
