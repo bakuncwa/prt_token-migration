@@ -12,8 +12,8 @@ automation: the newly issued card number, i.e., the Primary Account Number (PAN)
 ## Index
 
 - **I.** **[`live/`](live/)** -- the production-deployed, single-merchant
-  implementation engineered for CardCorp's migration to the Revolut Bank acquirer
-  gateway. Currently deployed and operational.
+  implementation engineered for a card token migration to the Revolut Bank
+  acquirer gateway. Currently deployed and operational.
 - **II.** **[`production/`](production/)** -- a generalized, configuration-driven
   extension of the same pipeline, engineered to facilitate the onboarding of
   additional merchants' token migrations without modification of the underlying
@@ -295,10 +295,10 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   -- validated across 2,275 production records spanning 16 monthly cycles with zero
   pipeline errors.
 - Engineered a config-driven, multi-merchant extension of the pipeline
-  (`production/`) on Python 3.12, Cloud Run, Firestore, and Cloud Storage, with
-  pluggable Dataflow and Cloud SQL adapters and Gemini-assisted mapping-config
-  authoring, packaged for scalability and reuse across merchants without modifying
-  pipeline code, and validated against both live production data and a
-  structurally distinct synthetic merchant schema.
+  (`production/`), packaged as a product for scalability and reuse across
+  merchants without modifying pipeline code -- built on Cloud Run, Firestore,
+  and Cloud Storage, with pluggable Dataflow and Cloud SQL adapters and
+  Gemini-assisted mapping-config authoring invoked via Cloud Shell/CLI,
+  validated against live production data.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
