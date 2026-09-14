@@ -36,7 +36,7 @@ DigitalOcean MIT DB --{GET}--> GCS raw/ --transform--> GCS transformed/
                                                               v
                                                    Firestore (card.number only)
                                                               |
-                                            PaaS worker enters card.number by hand
+                                        PaaS worker enters card.number manually
                                                               |
                                                               v
                                     GCS transformed/ + Firestore --merge--> GCS cleaned/
@@ -133,7 +133,7 @@ sink system are all configuration, not code.
 
 ![Production Token Migration ETL diagram](Production%20Token%20Migration%20ETL.png)
 
-**What stays identical:** the staging logic itself -- read a source, apply a
+**Invariant components:** the staging logic itself -- read a source, apply a
 mapping, write a destination -- is the same shape as `live/column_mapping.py` and
 `live/export_firestore_to_gcs.py`'s merge step, now driven by
 `production/configs/<merchant>.json` instead of hardcoded rename dictionaries.
@@ -149,7 +149,7 @@ export. `production/extraction_adapters.py` does not trust that assumption silen
 `CardNumber`, `PAN`, `card.number`) unconditionally before a byte reaches GCS,
 regardless of which extraction adapter fetched the data.
 
-**What is pluggable, per merchant:**
+**Configurable components, per merchant:**
 
 | Piece | Default | Opt-in alternative |
 |---|---|---|
@@ -160,9 +160,9 @@ regardless of which extraction adapter fetched the data.
 
 Full reasoning behind each default: [`production/DESIGN.md`](production/DESIGN.md).
 
-**What remains a placeholder, by design, tracked as data rather than left implicit:**
-see [`production/open_decisions.py`](production/open_decisions.py). As of this
-write-up:
+**Outstanding implementation decisions,** tracked as structured data rather than
+left implicit: see [`production/open_decisions.py`](production/open_decisions.py).
+Date edited: 2026-09-13.
 
 1. **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py`
    proposes a mapping config but deliberately refuses to write it anywhere until a
@@ -203,13 +203,13 @@ any cloud credential:
 
 ## Cost comparison
 
-For a business weighing whether to adopt the production version merchant by
-merchant: the pluggable design in `production/` means cost scales with which
-adapters a merchant opts into, not with the codebase itself. Every merchant on the
-default path (Cloud Run puller, Firestore, no Dataflow, no SQL) costs approximately
-the same as the live pipeline does today. Dataflow and Cloud SQL are the two line
-items that shift a near-zero bill into a recurring monthly cost, and both are
-opt-in per merchant, not pipeline-wide.
+For adoption decisions evaluated on a per-merchant basis, the pluggable design of
+`production/` ties operating cost to the adapters a given merchant selects, not to
+the codebase itself. Every merchant on the default path (Cloud Run puller,
+Firestore, no Dataflow, no SQL) incurs approximately the same cost as the live
+pipeline does today. Dataflow and Cloud SQL are the two line items that shift the
+cost basis from near-zero to a material recurring monthly expense, and both are
+opt-in per merchant rather than pipeline-wide.
 
 The live pipeline's actual measured volume -- 2,275 records across 16 monthly
 Firestore collections, a few dozen function invocations per month, well under
@@ -220,7 +220,7 @@ volume.
 |---|---|---|---|
 | Compute (Cloud Run functions) | \$0.00 -- a few dozen invocations/month against a free tier of 2,000,000 requests, 180,000 vCPU-seconds, and 360,000 GiB-seconds/month | \$0.00 -- free tier is project-wide, not per merchant; a few dozen invocations per merchant per month stays far under the shared limit through dozens of merchants | Same as default path |
 | Reconciliation store | \$0.00 -- 2,275 documents (tens of KB) against a daily free tier of 1 GiB stored, 50,000 reads, 20,000 writes, 20,000 deletes | \$0.00 at comparable per-merchant volume -- roughly 20+ merchants could each fully re-read their dataset on the same day before the shared daily read quota is touched | + Cloud SQL: no free tier. Smallest shared-core instance (`db-f1-micro`-equivalent) runs approximately \$7-\$10/month in compute alone, before storage, backup, and network -- a flat cost per opted-in merchant regardless of usage |
-| Extraction | included above | included above | + Dataflow: no free tier. One small worker (1 vCPU, 3.75 GiB) for a 10-minute monthly batch run costs roughly \$0.056/vCPU-hour x 0.167 hour + \$0.003557/GiB-hour x 3.75 GiB x 0.167 hour, approximately \$0.01-\$0.02 per run -- the compute itself is cheap; the cost is running and operating a second execution substrate at all |
+| Extraction | included above | included above | + Dataflow: no free tier. One small worker (1 vCPU, 3.75 GiB) for a 10-minute monthly batch run costs roughly \$0.056/vCPU-hour x 0.167 hour + \$0.003557/GiB-hour x 3.75 GiB x 0.167 hour, approximately \$0.01-\$0.02 per run -- the compute cost itself is negligible; the material cost is operating a second execution substrate at all |
 | Mapping authoring | manual, developer time only | Gemini agent, flash-tier pricing (\$0.30/1M input tokens, \$2.50/1M output tokens): a single onboarding call of roughly 5,000 input and 1,000 output tokens costs about \$0.004, run once per merchant onboarding | Same |
 | CI/CD | manual `gcloud functions deploy` | Cloud Build, within the 120 free build-minutes/day (e2-standard-2) at this deploy frequency | Same |
 | Storage (GCS) | approximately \$0.002/month (well under 100 MB at \$0.020/GB/month) | scales linearly with merchant count at the same per-merchant rate | Same |
@@ -258,11 +258,12 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   and sink adapters, validated against both the live pipeline's real production
   data and a structurally different synthetic merchant schema.
 
-- **2,275** -- production records reconciled
-- **16** -- monthly cycles processed
-- **0** -- pipeline errors
-- **1** -- field ever touched by a human reviewer (`card.number`)
-- **2** -- merchant schemas validated against the production staging service
+![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
+
+Each metric above is a standalone count, not a share of a common denominator;
+accordingly, each is rendered as its own single-category pie (an unfilled,
+full-circle wedge) rather than combined into one proportional pie, which would
+misrepresent five incommensurable quantities as parts of a single whole.
 
 ## Data handling
 
