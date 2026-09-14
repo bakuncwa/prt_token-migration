@@ -1,4 +1,4 @@
-# Token Migration ETL
+# Card Token Migration
 
 A PCI-scoped ETL pipeline that migrates card-on-file data from a DigitalOcean-hosted
 MIT (Merchant-Initiated Transaction) database into a new token vault, using Google
@@ -24,7 +24,6 @@ layer for the one field that cannot be automated: the new card number (PAN).
 - **IX.** [Production version](#production-version)
 - **X.** [Cost comparison](#cost-comparison)
 - **XI.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
-- **XII.** [Data handling](#data-handling)
 
 ## Architecture (live pipeline)
 
@@ -248,29 +247,20 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 
 ## Key Technical Contributions & Impact
 
+- Spearheaded engineering modular 4-party payment model ETL pipelines via SFTP file
+  transfer client migrations to the Revolut Bank acquirer API gateway.
 - Architected Google Cloud Run functions via Eventarc for PCI-compliant card token
   migration, automating merchant-initiated transaction (MIT) PAN data cleaning and
   bidirectional DigitalOcean Kubernetes API synchronization.
-- Spearheaded engineering modular 4-party payment model ETL pipelines via SFTP file
-  transfer client migrations to the Revolut Bank acquirer API gateway.
-- Generalized a single-merchant pipeline into a config-driven, multi-merchant
-  "token migration as a service" architecture with pluggable extraction, staging,
-  and sink adapters, validated against both the live pipeline's real production
-  data and a structurally different synthetic merchant schema.
+- Automated Google Cloud Storage (GCS) bucket-to-staging-layer transformation into
+  Firestore NoSQL database on upload for secure reconciliation without PII leakage
+  -- validated across 2,275 production records spanning 16 monthly cycles with zero
+  pipeline errors.
+- Engineered a config-driven, multi-merchant extension of the pipeline
+  (`production/`) on Python 3.12, Cloud Run, Firestore, and Cloud Storage, with
+  pluggable Dataflow and Cloud SQL adapters and Gemini-assisted mapping-config
+  authoring, packaged for scalability and reuse across merchants without modifying
+  pipeline code, and validated against both live production data and a
+  structurally distinct synthetic merchant schema.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
-
-Each metric above is a standalone count, not a share of a common denominator;
-accordingly, each is rendered as its own single-category pie (an unfilled,
-full-circle wedge) rather than combined into one proportional pie, which would
-misrepresent five incommensurable quantities as parts of a single whole.
-
-## Data handling
-
-- All CSV I/O reads with `dtype=str, keep_default_na=False` throughout both
-  pipelines, to prevent pandas from silently coercing types (for example, a BIN
-  becoming an integer and dropping leading zeros) or converting blank fields to
-  `NaN`.
-- Sensitive data (raw, transformed, and cleaned CSVs, spreadsheets, credentials) is
-  git-ignored and never committed; see `.gitignore`. The one exception is
-  `production/sample_data/`, which holds only synthetic, non-real test fixture data.
