@@ -99,35 +99,53 @@ are enumerated below:
 This procedure deploys six Generation 2 Cloud Run functions: one per pipeline
 stage, plus a sixth that replicates newly uploaded raw data into the
 production pipeline's dedicated bucket (see Step 6) for the reference
-merchant. Each command below must be executed from within the `live/`
-directory:
+merchant.
+
+**Architectural constraint (identical to Step 6's):** the Python Cloud
+Functions buildpack requires the entry-point file to be named `main.py` and
+reside at the source root; none of `live/`'s own modules are named `main.py`.
+Each command below therefore stages a minimal directory -- the entry-point
+module plus whichever of its own local imports it requires -- with a
+generated `main.py` that re-exports the entry point, executed from the
+repository root:
 
 ```bash
-cd live
-
+STAGE=$(mktemp -d)
+cp live/cf_transform_on_upload.py live/column_mapping.py live/transform_load_gcs.py \
+   live/requirements.txt "$STAGE/"
+echo 'from cf_transform_on_upload import on_raw_uploaded  # noqa: F401' > "$STAGE/main.py"
 gcloud functions deploy transform-on-raw-upload \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_raw_uploaded \
+  --source="$STAGE" --entry-point=on_raw_uploaded \
   --trigger-bucket=<BUCKET_NAME> \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
+STAGE=$(mktemp -d)
+cp live/cf_load_firestore_on_upload.py live/collection_naming.py live/load_to_firestore.py \
+   live/requirements.txt "$STAGE/"
+echo 'from cf_load_firestore_on_upload import on_transformed_uploaded  # noqa: F401' > "$STAGE/main.py"
 gcloud functions deploy load-firestore-on-transformed-upload \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_transformed_uploaded \
+  --source="$STAGE" --entry-point=on_transformed_uploaded \
   --trigger-bucket=<BUCKET_NAME> \
   --set-env-vars=FIRESTORE_DATABASE="(default)" \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
+STAGE=$(mktemp -d)
+cp live/export_firestore_to_gcs.py live/collection_naming.py live/load_to_firestore.py \
+   live/requirements.txt "$STAGE/"
+echo 'from export_firestore_to_gcs import on_export_completed, on_firestore_write  # noqa: F401' \
+  > "$STAGE/main.py"
 gcloud functions deploy export-on-firestore-export-button \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_export_completed \
+  --source="$STAGE" --entry-point=on_export_completed \
   --trigger-bucket=<BUCKET_NAME> \
   --set-env-vars=FIRESTORE_DATABASE="(default)" \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
 gcloud functions deploy export-on-firestore-write \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_firestore_write \
+  --source="$STAGE" --entry-point=on_firestore_write \
   --trigger-event-filters="type=google.cloud.firestore.document.v1.written" \
   --trigger-event-filters="database=(default)" \
   --trigger-event-filters-path-pattern="document={collection}/{docId}" \
@@ -135,17 +153,24 @@ gcloud functions deploy export-on-firestore-write \
   --set-env-vars=GCS_BUCKET=<BUCKET_NAME>,FIRESTORE_DATABASE="(default)" \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
+STAGE=$(mktemp -d)
+cp live/deploy_digitalocean.py live/requirements.txt "$STAGE/"
+echo 'from deploy_digitalocean import on_paas_reconciled  # noqa: F401' > "$STAGE/main.py"
 gcloud functions deploy sync-paas-reconciled-to-digitalocean \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_paas_reconciled \
+  --source="$STAGE" --entry-point=on_paas_reconciled \
   --trigger-bucket=<BUCKET_NAME> \
   --set-secrets=DIGITALOCEAN_TOKEN=<SECRET_NAME>:latest \
   --set-env-vars=DO_CLUSTER_NAME=<DO_CLUSTER_NAME> \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
 
+STAGE=$(mktemp -d)
+cp live/replicate_raw_to_production.py live/requirements.txt "$STAGE/"
+echo 'from replicate_raw_to_production import on_raw_uploaded_replicate  # noqa: F401' \
+  > "$STAGE/main.py"
 gcloud functions deploy replicate-raw-to-production \
   --gen2 --runtime=python312 --region=<REGION> \
-  --source=. --entry-point=on_raw_uploaded_replicate \
+  --source="$STAGE" --entry-point=on_raw_uploaded_replicate \
   --trigger-bucket=<BUCKET_NAME> \
   --set-env-vars=PRODUCTION_BUCKET=<PRODUCTION_BUCKET_NAME>,PRODUCTION_MERCHANT=pilot \
   --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3

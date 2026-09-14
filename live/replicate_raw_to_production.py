@@ -15,10 +15,20 @@ does not, and cannot safely, provide (the live bucket's own
 transform-on-raw-upload is triggered bucket-wide on any raw/ upload,
 irrespective of subfolder).
 
-Deployment (Generation 2, executed from the live/ directory):
+Deployment (Generation 2, executed from the repository root). The Python
+Cloud Functions buildpack requires the entry-point file to be named
+`main.py` at the source root; since this module has no local
+dependency on the rest of live/, a minimal staging directory re-exporting
+its single entry point is sufficient, following the identical pattern
+production/'s SETUP.md step employs for staging_service.py:
+  STAGE=$(mktemp -d)
+  cp live/replicate_raw_to_production.py live/requirements.txt "$STAGE/"
+  echo 'from replicate_raw_to_production import on_raw_uploaded_replicate  # noqa: F401' \\
+    > "$STAGE/main.py"
+
   gcloud functions deploy replicate-raw-to-production \\
     --gen2 --runtime=python312 --region=<REGION> \\
-    --source=. --entry-point=on_raw_uploaded_replicate \\
+    --source="$STAGE" --entry-point=on_raw_uploaded_replicate \\
     --trigger-bucket=<LIVE_BUCKET_NAME> \\
     --set-env-vars=PRODUCTION_BUCKET=<PRODUCTION_BUCKET_NAME>,PRODUCTION_MERCHANT=pilot \\
     --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3
