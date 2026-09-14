@@ -1,14 +1,15 @@
-"""Token Migration ETL: raw CSV (GCS) -> transform -> transformed CSV (GCS).
+"""Token Migration ETL: raw CSV (GCS) -> transformation -> transformed CSV (GCS).
 
-Mirrors the "Token Migration ETL" diagram, minus the Cloud SQL staging
-step: raw and transformed datasets both live in the same GCS bucket, and
-the rename/split rules from "Data Transformation_TokenMigration.xlsx" are
-applied in-memory (see column_mapping.py).
+Mirrors the "Token Migration ETL" diagram, exclusive of the Cloud SQL
+staging step depicted therein: the raw and transformed datasets both
+reside within the identical GCS bucket, and the rename/split rules
+specified by "Data Transformation_TokenMigration.xlsx" are applied
+in-memory (see column_mapping.py).
 
-Required environment variables:
-  GCS_BUCKET   e.g. <BUCKET_NAME>
+Required environment variable:
+  GCS_BUCKET   for example, <BUCKET_NAME>
 
-Optional:
+Optional environment variables:
   RAW_BLOB_NAME           default "raw/May 2025.csv"
   TRANSFORMED_BLOB_NAME   default "transformed/Transformed_May_2025.csv"
 
@@ -29,6 +30,8 @@ from column_mapping import transform_dataframe
 
 
 def env(name: str, default: str | None = None, required: bool = False) -> str:
+    """Retrieves environment variable `name`, raising explicitly if
+    it is designated as required and absent."""
     value = os.environ.get(name, default)
     if required and not value:
         raise SystemExit(f"Missing required environment variable: {name}")
@@ -36,17 +39,22 @@ def env(name: str, default: str | None = None, required: bool = False) -> str:
 
 
 def download_raw_csv(bucket: storage.Bucket, blob_name: str) -> pd.DataFrame:
+    """Downloads and parses the raw CSV object from the specified
+    bucket."""
     blob = bucket.blob(blob_name)
     if not blob.exists():
         raise SystemExit(f"Raw object not found: gs://{bucket.name}/{blob_name}")
     data = blob.download_as_bytes()
-    # dtype=str + keep_default_na=False: this is payment/PII data, we do not
-    # want pandas silently coercing types (e.g. Bin -> int, dropping leading
-    # zeros) or turning blank fields into NaN.
+    # dtype=str combined with keep_default_na=False: this constitutes
+    # payment and PII data, and pandas must not be permitted to
+    # silently coerce types (for example, a BIN becoming an integer
+    # and discarding leading zeros) or to convert blank fields to NaN.
     return pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
 
 
 def upload_csv(bucket: storage.Bucket, blob_name: str, df: pd.DataFrame) -> str:
+    """Serializes and uploads a DataFrame as a CSV object, returning
+    the resultant gs:// URI."""
     blob = bucket.blob(blob_name)
     csv_bytes = df.to_csv(index=False).encode("utf-8")
     blob.upload_from_string(csv_bytes, content_type="text/csv")

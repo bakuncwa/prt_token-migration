@@ -1,9 +1,11 @@
-"""Local dry run of the Token Migration transform -- no GCS involved.
+"""Local dry run of the Token Migration transformation procedure -- no
+GCS involvement.
 
-Reads a raw CSV from disk, applies the same rename/split rules used by
-transform_load_gcs.py (column_mapping.transform_dataframe), and writes
-the transformed CSV to disk. Useful for verifying the transform before
-any cloud resources exist.
+Reads a raw CSV from disk, applies the identical rename/split rules
+employed by transform_load_gcs.py (column_mapping.transform_dataframe),
+and writes the transformed CSV to disk. Useful for verifying the
+transformation procedure prior to the provisioning of any cloud
+resources.
 
 Usage:
   python test_transform_local.py [raw_csv_path] [output_csv_path]

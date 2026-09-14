@@ -1,25 +1,28 @@
-"""Trigger deployment of the Token Migration ETL service to DigitalOcean,
-and sync PaaS-reconciled data back to the DigitalOcean MIT Database.
+"""Triggers deployment of the Token Migration ETL service to
+DigitalOcean, and synchronizes PaaS-reconciled data back to the
+DigitalOcean MIT Database.
 
-Template only -- no live DigitalOcean credentials are configured in this
-environment, so neither leg of this script runs automatically yet. Fill
-in the env vars below and run/deploy once access exists.
+Template exclusively -- no live DigitalOcean credentials are
+configured within this environment, such that neither leg of this
+script executes automatically at present. Populate the environment
+variables enumerated below and execute/deploy once access has been
+provisioned.
 
-## 1. Image rollout (main(), unchanged)
+## 1. Image rollout (main(), unaltered)
 
-Targets the DigitalOcean Kubernetes cluster shown in the ETL diagram
-("DigitalOcean Kubernetes API"): authenticates doctl, pulls kubeconfig
-for the target cluster, then rolls the ETL deployment to the given
-image tag and waits for the rollout to finish. Requires `doctl` and
-`kubectl` on the runner.
+Targets the DigitalOcean Kubernetes cluster depicted within the ETL
+diagram ("DigitalOcean Kubernetes API"): authenticates doctl, retrieves
+the kubeconfig for the target cluster, then rolls the ETL deployment
+to the specified image tag and awaits the rollout's completion.
+Requires `doctl` and `kubectl` upon the runner.
 
 Required environment variables:
-  DIGITALOCEAN_TOKEN     DO API token (scope: read/write)
-  DO_CLUSTER_NAME         DOKS cluster name or ID
-  K8S_NAMESPACE           namespace the ETL deployment lives in
+  DIGITALOCEAN_TOKEN     DigitalOcean API token (scope: read/write)
+  DO_CLUSTER_NAME         DOKS cluster name or identifier
+  K8S_NAMESPACE           namespace within which the ETL deployment resides
   K8S_DEPLOYMENT_NAME     Deployment name to roll
-  K8S_CONTAINER_NAME      container name within the pod spec to update
-  IMAGE                   full image ref to deploy, e.g. registry/etl:1.2.3
+  K8S_CONTAINER_NAME      container name within the pod specification to update
+  IMAGE                   complete image reference to deploy, for example registry/etl:1.2.3
 
 Usage:
   DIGITALOCEAN_TOKEN=... DO_CLUSTER_NAME=... K8S_NAMESPACE=... \\
@@ -28,23 +31,24 @@ Usage:
 
 ## 2. Reconciliation write-back (on_paas_reconciled(), Cloud Function)
 
-Covers the reverse-sync leg on the right side of the diagram: once
-export_firestore_to_gcs.py's on_firestore_write Cloud Function writes
-the dot-restored, reconciled dataset into gs://<bucket>/cleaned/, this
-Cloud Function fires automatically (Eventarc, GCS finalize) and POSTs
-the reconciled rows back to the DigitalOcean MIT Database via the
-DigitalOcean Kubernetes API. Like fetch_mit_records() in
-extract_digitalocean.py, push_records_to_digitalocean() is a placeholder
--- no live DigitalOcean API write access is configured in this
-environment yet.
+Addresses the reverse-synchronization leg on the right side of the
+diagram: once export_firestore_to_gcs.py's on_firestore_write Cloud
+Function writes the reconciled dataset into gs://<bucket>/cleaned/,
+this Cloud Function is invoked automatically (Eventarc, GCS finalize)
+and transmits the reconciled rows back to the DigitalOcean MIT
+Database via the DigitalOcean Kubernetes API. As with
+fetch_mit_records() within extract_digitalocean.py,
+push_records_to_digitalocean() constitutes a placeholder -- no live
+DigitalOcean API write access is configured within this environment.
 
 Required environment variables:
-  DIGITALOCEAN_TOKEN   DO API token (scope: read/write)
-  DO_CLUSTER_NAME       DOKS cluster name or ID fronting the MIT Database
+  DIGITALOCEAN_TOKEN   DigitalOcean API token (scope: read/write)
+  DO_CLUSTER_NAME       DOKS cluster name or identifier fronting the MIT Database
 
-Deploy (2nd gen, from the scripts/ directory). --min-instances=0 and a
-low --max-instances cap keep this inside the Cloud Run/Cloud Functions
-Always Free tier:
+Deployment (Generation 2, executed from the scripts/ directory).
+--min-instances=0 together with a low --max-instances ceiling
+maintain this function within the Cloud Run/Cloud Functions Always
+Free tier:
   gcloud functions deploy sync-paas-reconciled-to-digitalocean \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_paas_reconciled \\
@@ -70,6 +74,8 @@ CLEANED_PREFIX = "cleaned/"
 
 
 def env(name: str) -> str:
+    """Retrieves environment variable `name`, raising explicitly if
+    it is absent."""
     value = os.environ.get(name)
     if not value:
         raise SystemExit(f"Missing required environment variable: {name}")
@@ -77,6 +83,8 @@ def env(name: str) -> str:
 
 
 def run(cmd: list[str]) -> None:
+    """Executes a subprocess command, echoing it prior to execution
+    and raising if it exits with a non-zero status."""
     print("+", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
@@ -113,22 +121,24 @@ def main() -> None:
             "--timeout=180s",
         ]
     )
-    print(f"Deployed {image} to {deployment} in {namespace} on cluster {cluster}")
+    print(f"Deployed {image} to {deployment} within {namespace} on cluster {cluster}")
 
 
 def download_reconciled_csv(bucket: storage.Bucket, blob_name: str) -> pd.DataFrame:
+    """Downloads and parses the reconciled CSV object from the
+    specified bucket."""
     blob = bucket.blob(blob_name)
     data = blob.download_as_bytes()
     return pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
 
 
 def push_records_to_digitalocean(token: str, cluster: str, df: pd.DataFrame) -> None:
-    """POST reconciled rows back to the MIT Database through the
+    """Transmits reconciled rows back to the MIT Database via the
     DigitalOcean Kubernetes API.
 
-    Placeholder: DigitalOcean write access has not been provisioned yet.
-    Replace the body once the actual DOKS-fronted MIT Database write
-    endpoint is known, e.g.:
+    Placeholder: DigitalOcean write access has not yet been
+    provisioned. Replace the body once the authentic DOKS-fronted MIT
+    Database write endpoint is known, for example:
 
         resp = requests.post(
             f"https://{cluster}.k8s.ondigitalocean.com/mit/records",
@@ -139,18 +149,18 @@ def push_records_to_digitalocean(token: str, cluster: str, df: pd.DataFrame) -> 
         resp.raise_for_status()
     """
     raise SystemExit(
-        "push_records_to_digitalocean() is a placeholder -- no "
-        "DigitalOcean API write access is configured yet. Implement it "
-        "once DIGITALOCEAN_TOKEN write access is granted."
+        "push_records_to_digitalocean() constitutes a placeholder -- no "
+        "DigitalOcean API write access is presently configured. Implement it "
+        "once DIGITALOCEAN_TOKEN write access has been granted."
     )
 
 
 @functions_framework.cloud_event
 def on_paas_reconciled(event: CloudEvent) -> None:
-    """Cloud Function (2nd gen): fires the moment on_firestore_write
-    (export_firestore_to_gcs.py) writes a reconciled file back to
-    cleaned/, and syncs it back to DigitalOcean -- no script invocation
-    required."""
+    """Cloud Function (Generation 2): invoked the moment
+    on_firestore_write (export_firestore_to_gcs.py) writes a
+    reconciled file back to cleaned/, synchronizing it to DigitalOcean
+    -- no script invocation is required."""
     bucket_name = event.data["bucket"]
     blob_name = event.data["name"]
 
@@ -169,7 +179,7 @@ def on_paas_reconciled(event: CloudEvent) -> None:
     print(f"  {len(df)} rows, {len(df.columns)} columns")
 
     push_records_to_digitalocean(token, cluster, df)
-    print(f"Synced {len(df)} reconciled rows back to DigitalOcean MIT Database (cluster {cluster})")
+    print(f"Synchronized {len(df)} reconciled rows back to the DigitalOcean MIT Database (cluster {cluster})")
 
 
 if __name__ == "__main__":

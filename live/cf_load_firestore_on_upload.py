@@ -1,30 +1,34 @@
-"""Cloud Function (2nd gen): auto-load transformed CSVs into Firestore.
+"""Cloud Function (Generation 2): automatically loads transformed CSVs
+into Firestore.
 
 Trigger: google.cloud.storage.object.v1.finalized on GCS_BUCKET.
 Entry point: on_transformed_uploaded
 
-Replaces the manual "run load_to_firestore.py" step: the instant a
-transformed CSV is uploaded under transformed/ (by
-cf_transform_on_upload.py), Eventarc fires this function, which reuses
-the same download_csv/load_dataframe building blocks as
-load_to_firestore.py to upsert into Firestore -- no script invocation
-required. Per load_dataframe(), only card.number is written (keyed by
-card.id); every other column stays in the transformed CSV and is never
-sent to Firestore at all.
+Supersedes the manual "execute load_to_firestore.py" procedure: the
+instant a transformed CSV is uploaded under transformed/ (by
+cf_transform_on_upload.py), Eventarc invokes this function, which
+reuses the identical download_csv() and load_dataframe() components
+employed by load_to_firestore.py to perform an upsert into Firestore
+-- no script invocation is required. Per load_dataframe(), exclusively
+card.number is written (indexed by card.id); every other column
+remains within the transformed CSV and is never transmitted to
+Firestore.
 
-Explicitly ignores cleaned/: that prefix holds PaaS-worker-reconciled
-exports, which are the *output* of manual review, not input to it, and
-are handled by export_firestore_to_gcs.py's on_firestore_write instead.
+Explicitly disregards cleaned/: this prefix holds PaaS-worker-reconciled
+exports, which constitute the *output* of manual review rather than
+input to it, and are handled instead by
+export_firestore_to_gcs.py's on_firestore_write.
 
 Loads into a dated MMYYYY_cardholders collection derived from the
-uploaded filename (see collection_naming.py), so each month's data gets
-its own collection -- override with FIRESTORE_COLLECTION for a fixed
-name instead.
+uploaded filename (see collection_naming.py), such that each month's
+data is assigned its own collection -- override via
+FIRESTORE_COLLECTION for a fixed identifier instead.
 
-Deploy (2nd gen, from the scripts/ directory). --min-instances=0 and a
-low --max-instances cap keep this inside the Cloud Run/Cloud Functions
-Always Free tier (2M requests, 360K GB-seconds, 180K vCPU-seconds per
-month) -- this bucket sees at most a handful of uploads a month:
+Deployment (Generation 2, executed from the scripts/ directory).
+--min-instances=0 together with a low --max-instances ceiling maintain
+this function within the Cloud Run/Cloud Functions Always Free tier
+(2M requests, 360K GB-seconds, 180K vCPU-seconds per month) -- this
+bucket receives, at most, a handful of uploads monthly:
   gcloud functions deploy load-firestore-on-transformed-upload \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_transformed_uploaded \\
@@ -50,11 +54,14 @@ CLEANED_PREFIX = "cleaned/"
 
 @functions_framework.cloud_event
 def on_transformed_uploaded(event: CloudEvent) -> None:
+    """Cloud Run function entry point invoked upon the finalization of
+    an object within GCS_BUCKET; ignores any object outside
+    transformed/, and any object within cleaned/."""
     bucket_name = event.data["bucket"]
     blob_name = event.data["name"]
 
     if blob_name.startswith(CLEANED_PREFIX):
-        return  # handled by the PaaS reconciliation path instead
+        return  # handled instead by the PaaS reconciliation pathway
     if not blob_name.startswith(TRANSFORMED_PREFIX) or not blob_name.lower().endswith(".csv"):
         print(f"Ignoring gs://{bucket_name}/{blob_name} (not a {TRANSFORMED_PREFIX} CSV)")
         return
@@ -71,4 +78,4 @@ def on_transformed_uploaded(event: CloudEvent) -> None:
     db = firestore.Client(database=database)
 
     count = load_dataframe(df, db, collection)
-    print(f'Auto-loaded {count} documents into "{collection}" (database "{database}")')
+    print(f'Automatically loaded {count} documents into "{collection}" (database "{database}")')

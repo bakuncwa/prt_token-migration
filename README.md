@@ -296,12 +296,13 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   Firestore NoSQL database on upload for secure reconciliation without PII leakage
   -- validated across 2,275 production records spanning 16 monthly cycles with zero
   pipeline errors.
-- Engineered a config-driven, multi-merchant extension of the pipeline
-  (`production/`), packaged as a product for scalability and reuse across
-  merchants without modifying pipeline code -- built on Cloud Run, Firestore,
-  and Cloud Storage, with Dataflow (Apache Beam) for autoscaled, high-volume
-  extraction, Cloud Build CI/CD, and Gemini-assisted mapping-config authoring
-  invoked via Cloud Shell/CLI, validated against live production data.
+- Engineered a modular, config-driven, multi-merchant pipeline extension
+  (`production/`) for Payments-as-a-Service reuse across merchants without
+  modifying pipeline code -- architected on Cloud Run, Firestore, and Cloud
+  Storage, with a pluggable Dataflow (Apache Beam) extraction adapter for
+  autoscaled, high-volume onboarding, Cloud Build CI/CD, and Cloud
+  Shell/CLI-invoked, Gemini-assisted mapping-config authoring, packaged for
+  rapid, low-code merchant onboarding at scale.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
 

@@ -1,8 +1,8 @@
 # Production Pipeline: Architectural Design Decisions
 
 This document evaluates the merits of a general-purpose "token migration as a
-service" pipeline relative to the CardCorp-to-Revolut Bank instance from which
-it was generalized. The complete diagrammatic representation and supporting
+service" pipeline relative to the single-merchant instance from which it was
+generalized. The complete diagrammatic representation and supporting
 rationale are published alongside this work; the verdicts articulated below
 correspond precisely to the implementation contained within this directory.
 
@@ -15,7 +15,7 @@ a merchant whose data volume or structural characteristics necessitate it.
 
 The extraction procedure, as presently constituted, comprises a single GET
 request executed monthly, retrieving approximately 140 rows on average --
-2,275 rows in aggregate across 16 monthly cycles for CardCorp alone.
+2,275 rows in aggregate across 16 monthly cycles for the reference merchant alone.
 Dataflow's autoscaling worker pool and windowing model address computational
 problems that this pipeline does not, at present, possess, at the expense of
 introducing a second execution substrate alongside Cloud Run. Dataflow's

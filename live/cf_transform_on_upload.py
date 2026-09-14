@@ -1,19 +1,22 @@
-"""Cloud Function (2nd gen): auto-clean raw CSVs the moment they land in GCS.
+"""Cloud Function (Generation 2): automatically cleanses raw CSVs upon
+their arrival within GCS.
 
 Trigger: google.cloud.storage.object.v1.finalized on GCS_BUCKET.
 Entry point: on_raw_uploaded
 
-Replaces the manual "run transform_load_gcs.py" step: the instant a new
-raw CSV is uploaded under raw/ (by extract_digitalocean.py, or a manual
-drop), Eventarc fires this function, which reuses the same
-download_raw_csv/transform_dataframe/upload_csv building blocks as
-transform_load_gcs.py to write the transformed CSV to transformed/ -- no
-script invocation required.
+Supersedes the manual "execute transform_load_gcs.py" procedure: the
+instant a new raw CSV is uploaded under raw/ (by
+extract_digitalocean.py, or a manual upload), Eventarc invokes this
+function, which reuses the identical download_raw_csv(),
+transform_dataframe(), and upload_csv() components employed by
+transform_load_gcs.py to write the transformed CSV to transformed/ --
+no script invocation is required.
 
-Deploy (2nd gen, from the scripts/ directory). --min-instances=0 and a
-low --max-instances cap keep this inside the Cloud Run/Cloud Functions
-Always Free tier (2M requests, 360K GB-seconds, 180K vCPU-seconds per
-month) -- this bucket sees at most a handful of uploads a month:
+Deployment (Generation 2, executed from the scripts/ directory).
+--min-instances=0 together with a low --max-instances ceiling maintain
+this function within the Cloud Run/Cloud Functions Always Free tier
+(2M requests, 360K GB-seconds, 180K vCPU-seconds per month) -- this
+bucket receives, at most, a handful of uploads monthly:
   gcloud functions deploy transform-on-raw-upload \\
     --gen2 --runtime=python312 --region=europe-west2 \\
     --source=. --entry-point=on_raw_uploaded \\
@@ -35,8 +38,8 @@ TRANSFORMED_PREFIX = "transformed/"
 
 
 def _transformed_blob_name(raw_blob_name: str) -> str:
-    """Mirrors the naming convention used by transform_load_gcs.py's
-    default (raw "May 2025.csv" -> transformed "Transformed_May_2025.csv")."""
+    """Mirrors the naming convention employed by transform_load_gcs.py's
+    default behavior (raw "May 2025.csv" -> transformed "Transformed_May_2025.csv")."""
     filename = raw_blob_name.removeprefix(RAW_PREFIX)
     stem, _, ext = filename.rpartition(".")
     transformed_stem = f"Transformed_{stem.replace(' ', '_')}"
@@ -45,6 +48,8 @@ def _transformed_blob_name(raw_blob_name: str) -> str:
 
 @functions_framework.cloud_event
 def on_raw_uploaded(event: CloudEvent) -> None:
+    """Cloud Run function entry point invoked upon the finalization of
+    an object within GCS_BUCKET; ignores any object outside raw/."""
     bucket_name = event.data["bucket"]
     blob_name = event.data["name"]
 
