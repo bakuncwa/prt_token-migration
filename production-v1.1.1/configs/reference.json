@@ -1,0 +1,52 @@
+{
+  "merchant": "reference",
+  "description": "Synthetic reference configuration demonstrating production-v1.1.1's schema -- not an onboarded merchant, no live data is ever processed under this identifier. See DESIGN.md's 'Deployment status': this pipeline is deployed for scalability demonstration only, unwired from any live trigger, pending a merchant that actually satisfies DESIGN.md's two-condition test.",
+  "reconciled_by": {
+    "id_column": "card.id",
+    "fields": ["card.number"]
+  },
+  "collection_prefix": "cardholders",
+  "store": {
+    "type": "bigquery",
+    "project": "<PROJECT_ID>",
+    "dataset": "token_migration_reconciliation"
+  },
+  "deidentify": {
+    "kms_key": "projects/<PROJECT_ID>/locations/<REGION>/keyRings/<KEYRING_NAME>/cryptoKeys/<KEY_NAME>"
+  },
+  "extraction_adapter": "dataflow",
+  "reconciliation_adapter": "token_vault_api",
+  "reconciliation": {
+    "vault_url": "<TOKEN_VAULT_BASE_URL>"
+  },
+  "sink_adapter": "digitalocean_kubernetes",
+  "columns": {
+    "renames": {
+      "CustomerName": "name",
+      "RegistrationId": "id",
+      "City": "card.address_city",
+      "OPP_card.country": "card.address_country",
+      "OPP_billing.street1": "card.address_line1",
+      "State": "card.address_state",
+      "Zip": "card.address_zip"
+    },
+    "expansions": {
+      "UniqueId": {
+        "type": "copy_then_blank",
+        "targets": ["card.id", "card.transaction_ids", "card.number"]
+      },
+      "Expiry": {
+        "type": "split_date",
+        "source_format": "YYYY-MM",
+        "targets": ["card.exp_year", "card.exp_month"]
+      }
+    },
+    "repairs": {
+      "AccountNumberLast4": {
+        "type": "zero_pad_if_length",
+        "length": 3,
+        "target_length": 4
+      }
+    }
+  }
+}

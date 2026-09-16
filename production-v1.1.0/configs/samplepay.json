@@ -1,6 +1,6 @@
 {
   "merchant": "samplepay",
-  "description": "Synthetic sample merchant, not an actual customer. Deliberately structured to differ from configs/pilot.json -- differing column names, a differing Expiry date format (MM/YYYY versus the reference merchant's YYYY-MM), and a differing repair field length -- so as to demonstrate that the staging service generalizes across schemas rather than merely reproducing the reference merchant's. See production/sample_data/samplepay_raw.csv and test_staging_service.py's test_transform_for_different_schema().",
+  "description": "Synthetic sample merchant, not an actual customer. Deliberately structured to differ from configs/pilot.json -- differing column names, a differing Expiry date format (MM/YYYY versus the reference merchant's YYYY-MM), and a differing repair field length -- so as to demonstrate that the staging service generalizes across schemas rather than merely reproducing the reference merchant's. See production-v1.1.0/sample_data/samplepay_raw.csv and test_staging_service.py's test_transform_for_different_schema().",
   "reconciled_by": {
     "id_column": "card.id",
     "fields": ["card.number"]

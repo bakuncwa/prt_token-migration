@@ -15,37 +15,49 @@ Account Number (PAN).
 - **I.** **[`live/`](live/)** -- the production-deployed, single-merchant
   implementation engineered for a card token migration to the Revolut Bank
   acquirer gateway. Currently deployed and operational.
-- **II.** **[`production/`](production/)** -- a generalized, configuration-driven
+- **II.** **[`production-v1.1.0/`](production-v1.1.0/)** -- a generalized, configuration-driven
   extension of the same pipeline, engineered to facilitate the onboarding of
   additional merchants' token migrations without modification of the underlying
-  pipeline code. See [Production version](#production-version).
-- **III.** **[`SETUP.md`](SETUP.md)** -- the setup and deployment reference,
+  pipeline code. See [Production version (v1.1.0)](#production-version-v110-blank-and-manual).
+- **III.** **[`production-v1.1.1/`](production-v1.1.1/)** -- a de-identification/
+  re-identification extension of the same pipeline, engineered for a
+  structurally different requirement: enterprise-scale, fully automated
+  reconciliation against an authoritative token vault API, with the reconciled
+  dataset retained and queryable. Deployed for scalability demonstration only
+  -- no merchant is onboarded onto it. See [Production version
+  (v1.1.1)](#production-version-v111-de-identification-and-re-identification)
+  and [`production-v1.1.1/DESIGN.md`](production-v1.1.1/DESIGN.md).
+- **IV.** **[`SETUP.md`](SETUP.md)** -- the setup and deployment reference,
   comprising authentication procedures, requisite IAM roles, environment
   variables, and the precise `gcloud` commands required to deploy and diagnose
-  both implementations.
-- **IV.** [Technology stack](#technology-stack)
-- **V.** [Architecture (live pipeline)](#architecture-live-pipeline)
-- **VI.** [Firestore scope: rationale for restriction to `card.number`](#firestore-scope-rationale-for-restriction-to-cardnumber)
-- **VII.** [Pipeline stages (live)](#pipeline-stages-live)
-- **VIII.** [Column mapping (live)](#column-mapping-live)
-- **IX.** [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
-- **X.** [Production version](#production-version)
-- **XI.** [Cost comparison](#cost-comparison)
-- **XII.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
-- **XIII.** [References](#references)
+  all three implementations.
+- **V.** [Technology stack](#technology-stack)
+- **VI.** [Architecture (live pipeline)](#architecture-live-pipeline)
+- **VII.** [Firestore scope: rationale for restriction to `card.number`](#firestore-scope-rationale-for-restriction-to-cardnumber)
+- **VIII.** [Pipeline stages (live)](#pipeline-stages-live)
+- **IX.** [Column mapping (live)](#column-mapping-live)
+- **X.** [Deployed Cloud Run functions (live)](#deployed-cloud-run-functions-live)
+- **XI.** [Production version (v1.1.0)](#production-version-v110-blank-and-manual)
+- **XII.** [Production version (v1.1.1)](#production-version-v111-de-identification-and-re-identification)
+- **XIII.** [Cost comparison](#cost-comparison)
+- **XIV.** [Key Technical Contributions & Impact](#key-technical-contributions--impact)
+- **XV.** [References](#references)
 
 ## Technology stack
 
 | Layer | Technology | Role within this repository |
 |---|---|---|
-| Compute | Google Cloud Run functions (Generation 2), Eventarc | Every pipeline stage subsequent to extraction; triggered by GCS finalize and Firestore write events, in both `live/` and `production/` |
+| Compute | Google Cloud Run functions (Generation 2), Eventarc | Every pipeline stage subsequent to extraction; triggered by GCS finalize and Firestore write events, in `live/` and `production-v1.1.0/`; Pub/Sub events in `production-v1.1.1/` |
 | Staging storage | Google Cloud Storage (GCS) | `raw/`, `transformed/`, and `cleaned/` prefixes -- the intermediate staging layer between the source MIT database and the token vault |
-| Reconciliation store | Google Cloud Firestore | Narrowly scoped, single-field (`card.number`) manual reconciliation layer, namespaced per month (live) or per merchant and month (production) |
+| Reconciliation store | Google Cloud Firestore | Narrowly scoped, single-field (`card.number`) manual reconciliation layer, namespaced per month (live) or per merchant and month (`production-v1.1.0/`) |
+| Reconciliation store (v1.1.1 only) | Google BigQuery | Queryable, de-identified reconciliation table, namespaced per merchant and month; see [Production version (v1.1.1)](#production-version-v111-de-identification-and-re-identification) |
+| De-identification / re-identification (v1.1.1 only) | Google Cloud Data Loss Prevention (DLP), Cloud Key Management Service (KMS) | Deterministic-encryption tokenization of PAN values, keyed by a KMS-wrapped crypto key; reversed exclusively at the write-back step, never exposed to BigQuery or a human -- see [`production-v1.1.1/deidentify_adapters.py`](production-v1.1.1/deidentify_adapters.py) |
+| Event backbone (v1.1.1 only) | Google Cloud Pub/Sub | Decouples automated vault reconciliation from write-back synchronization, in place of v1.1.0's Firestore-write trigger |
 | Source / sink system | DigitalOcean Kubernetes API | The DigitalOcean-hosted Merchant Initiated Transaction (MIT) database, both read (extraction) and written (post-reconciliation synchronization) |
-| Extraction (optional, high-volume) | Google Cloud Dataflow (Apache Beam) | Pluggable `production/extraction_adapters.py` adapter, selected per merchant in place of the default scheduled Cloud Run puller |
-| Mapping-config authoring | Google Gemini API | `production/gemini_mapping_agent.py` proposes `configs/<merchant>.json` from representative sample data, subject to human review |
+| Extraction (optional, high-volume) | Google Cloud Dataflow (Apache Beam) | Pluggable `extraction_adapters.py` adapter, selected per merchant in place of the default scheduled Cloud Run puller; the expected default for any merchant genuinely onboarded onto `production-v1.1.1/` |
+| Mapping-config authoring | Google Gemini API | `production-v1.1.0/gemini_mapping_agent.py` proposes `configs/<merchant>.json` from representative sample data, subject to human review |
 | CI/CD | Google Cloud Build | Automated deployment of Cloud Run functions on push, within the free build-minutes tier |
-| Language / runtime | Python 3.12, pandas, Functions Framework | Shared implementation language across every stage of both the live and production pipelines |
+| Language / runtime | Python 3.12, pandas, Functions Framework | Shared implementation language across every stage of the live and both production pipelines |
 | Tooling | Cloud Shell, `gcloud` CLI, `doctl`, `kubectl` | Deployment, diagnostics, and DigitalOcean Kubernetes cluster operations (see [`SETUP.md`](SETUP.md)) |
 
 ## Architecture (live pipeline)
@@ -151,16 +163,16 @@ under project `cardcorp-token-migration`, region `europe-west2`, bucket
 | `export-on-firestore-export-button` | `on_export_completed` | GCS finalize, bucket-wide (monitors for Firestore's export completion marker under `cleaned/`) |
 | `export-on-firestore-write` | `on_firestore_write` | Firestore document write operation, applicable to any `MMYYYY_cardholders` collection |
 | `sync-paas-reconciled-to-digitalocean` | `on_paas_reconciled` | GCS finalize, bucket-wide (monitors `cleaned/*.csv`) |
-| `replicate-raw-to-production` | `on_raw_uploaded_replicate` | GCS finalize, bucket-wide (monitors `raw/*.csv`); mirrors each object into the production pipeline's dedicated bucket, under `raw/pilot/`, so the reference merchant continues to exercise `production/`'s generalized staging service against authentic data |
+| `replicate-raw-to-production` | `on_raw_uploaded_replicate` | GCS finalize, bucket-wide (monitors `raw/*.csv`); mirrors each object into the production pipeline's dedicated bucket, under `raw/pilot/`, so the reference merchant continues to exercise `production-v1.1.0/`'s generalized staging service against authentic data |
 
 The precise `gcloud functions deploy` command for each function is documented
 within that function's own module docstring; a placeholder-parameterized,
 deployment-agnostic formulation of the equivalent commands is provided in
 [`SETUP.md`](SETUP.md).
 
-## Production version
+## Production version (v1.1.0: blank-and-manual)
 
-`production/` implements a read, transform, reconcile, write architecture
+`production-v1.1.0/` implements a read, transform, reconcile, write architecture
 structurally identical to that of the pipeline described above; however, the
 merchant identity, mapping rules, extraction source, and sink system are
 rendered as configuration rather than as code.
@@ -171,13 +183,13 @@ rendered as configuration rather than as code.
 the application of a mapping, and the writing of a destination -- is
 structurally identical to that of `live/column_mapping.py` and the merge
 procedure within `live/export_firestore_to_gcs.py`, and is driven instead by
-`production/configs/<merchant>.json` in place of hardcoded rename dictionaries.
+`production-v1.1.0/configs/<merchant>.json` in place of hardcoded rename dictionaries.
 Firestore's function within the architecture remains unaltered: it retains
 responsibility for exactly one field, remains editable exclusively through its
 own Console interface, and is now namespaced by merchant in addition to month
 (`<merchant>_MMYYYY_cardholders`).
 
-**Deployment triggers mirror the live pipeline exactly:** `production/` is
+**Deployment triggers mirror the live pipeline exactly:** `production-v1.1.0/` is
 deployed as its own set of Cloud Run functions, each triggered by the
 identical event class as its live-pipeline counterpart -- a GCS finalize event
 upon upload to `raw/`, a Firestore document-write event upon manual
@@ -192,7 +204,7 @@ dataset back to DigitalOcean, generalizing the live pipeline's
 | `staging-on-firestore-write` | `on_firestore_write` | Firestore document write operation, applicable to any `<merchant>_MMYYYY_<prefix>` collection |
 | `staging-on-cleaned-upload` | `on_cleaned_uploaded` | GCS finalize, bucket-wide (monitors `cleaned/<merchant>/*.csv`); dispatches to the merchant's configured `sink_adapter`, e.g. DigitalOcean Kubernetes |
 
-`production/` is deployed against its own dedicated GCS bucket, distinct from
+`production-v1.1.0/` is deployed against its own dedicated GCS bucket, distinct from
 the live pipeline's, so that its merchant-namespaced `raw/<merchant>/` layout
 can never collide with the live bucket's flat, bucket-wide `raw/` trigger.
 The reference merchant (`configs/pilot.json`) is kept populated with authentic
@@ -200,7 +212,7 @@ data via `replicate-raw-to-production` (see [Deployed Cloud Run functions
 (live)](#deployed-cloud-run-functions-live)), rather than by writing into the
 live bucket's own `raw/` prefix.
 
-See [`production/sink_adapters.py`](production/sink_adapters.py) for
+See [`production-v1.1.0/sink_adapters.py`](production-v1.1.0/sink_adapters.py) for
 `on_cleaned_uploaded`'s implementation and
 [`SETUP.md`](SETUP.md#6-deployment-procedure-production-pipeline) for the
 exact `gcloud functions deploy` commands.
@@ -209,7 +221,7 @@ exact `gcloud functions deploy` commands.
 deployment, a source system such as DigitalOcean's MIT database is expected to
 return the PAN column in an already-blanked state, an assumption consistent with
 that documented by `live/column_mapping.py` for CardCorp's raw export.
-`production/extraction_adapters.py` does not accept this assumption without
+`production-v1.1.0/extraction_adapters.py` does not accept this assumption without
 independent verification: `upload_raw_csv()` unconditionally blanks any
 PAN-shaped column (`FullAccountNumber`, `CardNumber`, `PAN`, `card.number`) prior
 to the transmission of any byte to GCS, irrespective of which extraction adapter
@@ -225,19 +237,19 @@ retrieved the underlying data.
 | Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto[^payreto] | any merchant-specific target system |
 
 The complete rationale underlying each default is documented in
-[`production/DESIGN.md`](production/DESIGN.md).
+[`production-v1.1.0/DESIGN.md`](production-v1.1.0/DESIGN.md).
 
 **Outstanding implementation decisions,** maintained as structured data rather
 than as implicit assumption: see
-[`production/open_decisions.py`](production/open_decisions.py). Date edited:
+[`production-v1.1.0/open_decisions.py`](production-v1.1.0/open_decisions.py). Date edited:
 2026-09-13.
 
-1. **Gemini review gate** -- unresolved. `production/gemini_mapping_agent.py`
+1. **Gemini review gate** -- unresolved. `production-v1.1.0/gemini_mapping_agent.py`
    proposes a mapping configuration but is deliberately constrained from
    persisting it under any circumstance until a formal review gate has been
    established; the module raises an exception rather than presuming an
    unreviewed proposal to be trustworthy.
-2. **DigitalOcean credentials for Payreto** -- unresolved. `production/`'s
+2. **DigitalOcean credentials for Payreto** -- unresolved. `production-v1.1.0/`'s
    extraction and sink adapters call the DigitalOcean Kubernetes API directly
    and require `<MERCHANT>_SOURCE_TOKEN`, `<MERCHANT>_SOURCE_CLUSTER`,
    `DIGITALOCEAN_TOKEN`, and `<MERCHANT>_DO_CLUSTER_NAME` to be present in the
@@ -248,19 +260,19 @@ than as implicit assumption: see
 
 ### Test Results
 
-`production/test_staging_service.py` executes four verification procedures, two
+`production-v1.1.0/test_staging_service.py` executes four verification procedures, two
 of which are independent of any cloud credential:
 
-1. `production/staging_service.py`'s configuration-driven `transform_dataframe()`
+1. `production-v1.1.0/staging_service.py`'s configuration-driven `transform_dataframe()`
    reproduces `live/column_mapping.py`'s hardcoded `transform_dataframe()`
    output byte-for-byte, evaluated against the authentic CardCorp
    `raw/January 2026.csv`. Requires live Google Cloud Platform (GCP) credentials.
 2. `transform_dataframe()` is evaluated against
-   `production/configs/samplepay.json`: a synthetic merchant possessing a
+   `production-v1.1.0/configs/samplepay.json`: a synthetic merchant possessing a
    structurally distinct schema relative to CardCorp's -- differing column
    names, a differing `Expiry` date format (`MM/YYYY` in place of CardCorp's
    `YYYY-MM`), and a differing zero-padding repair length. This procedure
-   executes entirely locally, against `production/sample_data/samplepay_raw.csv`,
+   executes entirely locally, against `production-v1.1.0/sample_data/samplepay_raw.csv`,
    with no cloud dependency whatsoever. This verification procedure identified a
    genuine defect prior to deployment: `_split_date()` declared `source_format`
    within the configuration schema yet disregarded it, remaining hardcoded to
@@ -280,10 +292,83 @@ of which are independent of any cloud credential:
    populated from the identical source data employed by the live pipeline, to
    permit direct comparison. Requires live GCP credentials.
 
+## Production version (v1.1.1: de-identification and re-identification)
+
+`production-v1.1.1/` addresses a structurally different requirement from
+either pipeline above: an enterprise merchant whose reconciliation must be
+**fully automated** (no human enters a card number) and whose reconciled PAN
+must remain **queryable** by more than one downstream consumer. v1.1.0's
+blank-and-manual design -- never storing a PAN, and bounding the one
+unavoidable manual field to a single human, a single collection, a single
+month -- has no equivalent here: there is no human step left to bound
+exposure to, and BigQuery, unlike Firestore's single-field document, is
+inherently a queryable store. This directory answers that requirement by
+protecting the PAN cryptographically instead of avoiding storing it,
+following Google Cloud's reference architecture for de-identification and
+re-identification of PII using Cloud DLP[^dlp-arch]:
+
+![De-identification and re-identification pipeline diagram](PII-DPL-Dataflow_ETL.png)
+
+```
+DigitalOcean MIT DB --{GET, Dataflow}--> GCS raw/ (DLP-tokenized PAN, KMS-wrapped key)
+                                                  |
+                                                  v
+                                      transformed/ + BigQuery (queryable, still tokenized)
+                                                  |
+                        Token vault API supplies new PAN token automatically (no human)
+                                                  |
+                                                  v
+                              BigQuery reconciled table --Pub/Sub--> re-identify (KMS decrypt,
+                                                                       write-back path only)
+                                                  |
+                                                  v
+                                    DigitalOcean MIT DB <--{POST}--
+```
+
+**When this directory applies, and when it does not:** see
+[`production-v1.1.1/DESIGN.md`](production-v1.1.1/DESIGN.md)'s two-condition
+test in full. In short, both of the following must hold, not just one:
+
+1. Volume or continuity already justifies a Dataflow execution substrate
+   (`production-v1.1.0/DESIGN.md`'s extraction verdict).
+2. The reconciled PAN must be retained, queryable, and automatically
+   reversible for more than one downstream consumer -- not bounded to a
+   single manual field.
+
+Absent both conditions, `production-v1.1.0/` remains the correct, lower-scope
+default: it satisfies PCI DSS Requirement 3 by never storing a PAN at all,
+rather than by storing one and protecting it, which is both a lower-scope and
+a lower-operating-cost posture. This directory's Cloud KMS key management,
+Cloud DLP template administration, and re-identification audit surface (PCI
+DSS Req. 3.6, Req. 10) are real, ongoing compliance obligations that v1.1.0
+simply does not carry.
+
+**Component summary** (see each module's own docstring for the complete
+rationale):
+
+| Component | v1.1.0 | v1.1.1 |
+|---|---|---|
+| PAN at extraction boundary | blanked (`extraction_adapters.py`) | DLP deterministic-encryption tokenized, KMS-wrapped key (`deidentify_adapters.py`) |
+| Reconciliation source | human, Firestore Console | authoritative token vault API, automated (`vault_reconciliation_adapters.py`) |
+| Reconciliation store | Firestore, one field per document | BigQuery, queryable table (`store_adapters.py`) |
+| Event backbone | GCS finalize + Firestore write | GCS finalize + Pub/Sub (`staging_service.py`) |
+| Re-identification | not applicable (PAN never stored) | gated exclusively to the write-back step, never persisted (`sink_adapters.py`) |
+
+**Deployment status:** this directory's three Cloud Run functions
+(`staging-on-raw-upload-v111`, `staging-on-vault-reconciliation-v111`,
+`staging-on-reconciled-event-v111` -- see
+[`SETUP.md`](SETUP.md#7-deployment-procedure-production-pipeline-v111-de-identification-and-re-identification-dormant))
+are deployed but deliberately left unwired to any live GCS bucket or Pub/Sub
+subscription: no merchant is onboarded onto this pipeline, and
+`configs/reference.json` is a synthetic schema demonstration, not a live
+merchant. It exists to demonstrate the pattern is ready the moment a merchant
+actually crosses the two-condition threshold above, at no incremental
+Dataflow/DLP/KMS/BigQuery usage cost until that happens.
+
 ## Cost comparison
 
 For adoption decisions evaluated on a per-merchant basis, the pluggable
-architecture of `production/` ties operating expenditure to the adapters
+architecture of `production-v1.1.0/` ties operating expenditure to the adapters
 selected by a given merchant, rather than to the codebase itself. Every
 merchant operating on the default configuration path (Cloud Run puller,
 Firestore, absent Dataflow) incurs a cost approximately equivalent to that
@@ -311,9 +396,18 @@ the baseline for estimation, in preference to an assumed or hypothetical volume.
 the low-cost configuration path; Dataflow should be approved for a given
 merchant exclusively where data volume or throughput requirements genuinely
 necessitate it, consistent with the verdicts documented in
-`production/DESIGN.md`. This practice maintains the marginal cost of onboarding
+`production-v1.1.0/DESIGN.md`. This practice maintains the marginal cost of onboarding
 merchant *N+1* at a near-zero basis, unless that merchant possesses a specific
 requirement for Dataflow's autoscaling extraction.
+
+**`production-v1.1.1/`'s standby cost:** with no merchant onboarded, this
+directory's incremental monthly cost is the flat per-key-version fee for the
+KMS key referenced in `configs/reference.json` (approximately \$0.06/month),
+plus Cloud Run's near-zero cost for three deployed-but-untriggered functions;
+BigQuery, DLP, Pub/Sub, and Dataflow incur no charge absent actual usage. The
+moment a merchant is onboarded, costs scale per DESIGN.md's two-condition
+test -- Dataflow, DLP record transforms, and BigQuery storage/query costs
+apply, in contrast to `production-v1.1.0/`'s near-zero default path.
 
 The figures presented above employ published Google Cloud list pricing as of
 the time of writing, applied to this project's own empirically measured usage;
@@ -328,6 +422,10 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 [Cloud Storage pricing](https://cloud.google.com/storage/pricing),
 [Dataflow pricing](https://cloud.google.com/dataflow/pricing),
 [Cloud Build pricing](https://cloud.google.com/build/pricing),
+[Cloud KMS pricing](https://cloud.google.com/kms/pricing),
+[Cloud DLP pricing](https://cloud.google.com/sensitive-data-protection/pricing),
+[BigQuery pricing](https://cloud.google.com/bigquery/pricing),
+[Pub/Sub pricing](https://cloud.google.com/pubsub/pricing),
 [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 ## Key Technical Contributions & Impact
@@ -338,7 +436,7 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   token migration, automating merchant-initiated transaction (MIT) PAN data
   cleaning and bidirectional DigitalOcean Kubernetes API synchronization.
   Reengineered to package a modular, config-driven, multi-merchant pipeline
-  extension (`production/`) for Payments-as-a-Service reuse across MIT data
+  extension (`production-v1.1.0/`) for Payments-as-a-Service reuse across MIT data
   -- architected on Cloud Run, Firestore, and Cloud Storage, with a pluggable
   Dataflow (Apache Beam) extraction adapter for autoscaled, high-volume
   onboarding, Cloud Build CI/CD, and Cloud Shell/CLI-invoked, Gemini-assisted
@@ -347,6 +445,15 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
   into Firestore NoSQL database on upload for secure reconciliation without
   PII leakage -- validated across 2,275 production records spanning 16
   monthly cycles with zero pipeline errors.
+- Designed a de-identification/re-identification extension
+  (`production-v1.1.1/`) adapting Google Cloud's reference architecture for
+  PII de-identification via Cloud DLP to enterprise-scale, fully automated
+  PAN reconciliation against an authoritative token vault API -- Cloud DLP
+  deterministic-encryption tokenization keyed by a Cloud KMS-wrapped crypto
+  key, BigQuery for queryable reconciled data, and Pub/Sub as the
+  event-driven backbone, gated behind an explicit two-condition adoption
+  test so the lower-scope, near-zero-cost v1.1.0 pipeline remains the
+  default for every merchant that does not require it.
 
 ![Key technical contribution metrics](Key%20Technical%20Contributions%20Stats.png)
 
@@ -357,3 +464,10 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 
 [^payreto]: Payreto Services Inc., payment service provider and financial
     outsourcing operator. https://www.payreto.com/about-us/.
+
+[^dlp-arch]: Google Cloud, *De-identification and re-identification of PII in
+    large-scale datasets using Cloud DLP*.
+    https://docs.cloud.google.com/architecture/de-identification-re-identification-pii-using-cloud-dlp.
+    `production-v1.1.1/` adapts this reference architecture to the card
+    token migration domain; see `production-v1.1.1/DESIGN.md` for the
+    adaptation's rationale and the two-condition test gating its adoption.

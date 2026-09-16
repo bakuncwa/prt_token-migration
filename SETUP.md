@@ -12,6 +12,10 @@
   (`gcloud services enable firestore.googleapis.com storage.googleapis.com cloudfunctions.googleapis.com run.googleapis.com eventarc.googleapis.com cloudbuild.googleapis.com`).
 - A Firestore database provisioned in **Native mode** within the target region
   (`gcloud firestore databases create --location=<REGION> --type=firestore-native`).
+- **`production-v1.1.1/` only:** Cloud KMS, Cloud DLP (Sensitive Data
+  Protection), BigQuery, and Pub/Sub additionally enabled
+  (`gcloud services enable cloudkms.googleapis.com dlp.googleapis.com bigquery.googleapis.com pubsub.googleapis.com`).
+  Not required for `live/` or `production-v1.1.0/`.
 
 ## 1. Authentication Procedure
 
@@ -75,7 +79,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -r live/requirements.txt   # to work on the live pipeline
-pip install -r production/requirements.txt    # to work on the production pipeline
+pip install -r production-v1.1.0/requirements.txt    # to work on production v1.1.0
+pip install -r production-v1.1.1/requirements.txt    # to work on production v1.1.1
 ```
 
 ## 4. Environment Variable Reference
@@ -87,12 +92,16 @@ are enumerated below:
 
 | Variable | Used by | Example |
 |---|---|---|
-| `GCS_BUCKET` | both pipelines | `<BUCKET_NAME>` |
-| `FIRESTORE_DATABASE` | both pipelines | `(default)` |
-| `MERCHANT` | production only | `<MERCHANT_ID>`, e.g. `pilot` |
+| `GCS_BUCKET` | all three pipelines | `<BUCKET_NAME>` |
+| `FIRESTORE_DATABASE` | live, production v1.1.0 | `(default)` |
+| `MERCHANT` | production v1.1.0, v1.1.1 | `<MERCHANT_ID>`, e.g. `pilot` (v1.1.0) / `reference` (v1.1.1, non-production) |
 | `TRANSFORMED_BLOB_NAME` | manual/CLI runs | `transformed/Transformed_<Month>_<Year>.csv` |
 | `RAW_BLOB_NAME` | manual/CLI runs | `raw/<Month Year>.csv` (live) / `raw/<MERCHANT_ID>/<Month Year>.csv` (production) |
 | `DIGITALOCEAN_TOKEN`, `DO_CLUSTER_NAME` | DigitalOcean legs (placeholders until access is granted) | -- |
+| `GCP_PROJECT` | production v1.1.1 only | `<PROJECT_ID>` |
+| `DLP_WRAPPED_AES_KEY` | production v1.1.1 only | base64 AES-256 key, wrapped via `gcloud kms encrypt` under the key named in `configs/<merchant>.json`'s `deidentify.kms_key` (see Step 7) |
+| `PUBSUB_RECONCILED_TOPIC` | production v1.1.1 only | `<MERCHANT_ID>-reconciled` |
+| `<MERCHANT>_VAULT_TOKEN` | production v1.1.1 only (placeholder until a vault is provisioned, see `vault_reconciliation_adapters.py`) | -- |
 
 ## 5. Deployment Procedure: Live Pipeline
 
@@ -183,7 +192,7 @@ each newly uploaded `raw/*.csv` object into
 pipeline's generalized `staging_service.py` against authentic data, without
 requiring a merchant subfolder to ever exist within the live bucket itself.
 
-## 6. Deployment Procedure: Production Pipeline
+## 6. Deployment Procedure: Production Pipeline (v1.1.0)
 
 **Architectural constraint:** the Python Cloud Functions buildpack imposes a
 requirement that the entry-point file be named `main.py` and reside at the
@@ -194,9 +203,9 @@ requisite entry points, rather than renaming the source file itself:
 
 ```bash
 STAGE=$(mktemp -d)
-cp production/staging_service.py production/merchant_config.py production/store_adapters.py \
-   production/sink_adapters.py production/requirements.txt "$STAGE/"
-cp -r production/configs "$STAGE/"
+cp production-v1.1.0/staging_service.py production-v1.1.0/merchant_config.py production-v1.1.0/store_adapters.py \
+   production-v1.1.0/sink_adapters.py production-v1.1.0/requirements.txt "$STAGE/"
+cp -r production-v1.1.0/configs "$STAGE/"
 {
   echo 'from staging_service import on_raw_uploaded, on_firestore_write  # noqa: F401'
   echo 'from sink_adapters import on_cleaned_uploaded  # noqa: F401'
@@ -237,15 +246,120 @@ in addition to the shared `DIGITALOCEAN_TOKEN` secret.
 
 **The onboarding of a new merchant does not necessitate a redeployment,**
 unless that merchant is the first to select a given sink adapter's required
-credential. The addition of `production/configs/<MERCHANT_ID>.json` (see
-`production/configs/pilot.json` for the requisite schema) takes effect upon
+credential. The addition of `production-v1.1.0/configs/<MERCHANT_ID>.json` (see
+`production-v1.1.0/configs/pilot.json` for the requisite schema) takes effect upon
 the subsequent invocation, inasmuch as the configuration is read from disk at
 runtime rather than embedded within the deployed image at build time; a
 merchant selecting `digitalocean_kubernetes` as its sink does, however,
 require `staging-on-cleaned-upload` to be redeployed with that merchant's
 `<MERCHANT>_DO_CLUSTER_NAME` variable added.
 
-## 7. Manual and Local Execution Procedures
+## 7. Deployment Procedure: Production Pipeline (v1.1.1, De-identification and Re-identification, Dormant)
+
+This procedure provisions the KMS key, DLP configuration, BigQuery dataset,
+and Pub/Sub topics `production-v1.1.1/` requires, then deploys its three
+Cloud Run functions. **These functions are deployed but deliberately left
+unwired from any live data flow** -- see
+[`production-v1.1.1/DESIGN.md`](production-v1.1.1/DESIGN.md)'s "Deployment
+status": no merchant is onboarded onto this pipeline, so every trigger below
+is pointed at a dedicated bucket and dedicated topics that nothing else in
+this repository ever publishes or uploads to, rather than at the live
+`<BUCKET_NAME>` any onboarded merchant's real data passes through. This
+keeps the pipeline demonstrably deployable without risking a real PAN ever
+reaching it before a merchant genuinely satisfies DESIGN.md's two-condition
+test.
+
+**7.1. KMS keyring and key:**
+
+```bash
+gcloud kms keyrings create token-migration-v111 --location=<REGION>
+gcloud kms keys create pan-deidentify --location=<REGION> \
+  --keyring=token-migration-v111 --purpose=encryption
+
+# Generate and wrap a 256-bit AES key for DLP's deterministic-encryption
+# transform (see deidentify_adapters.py); store the wrapped result as a
+# secret, never as a plaintext file.
+openssl rand -out /tmp/aes_key.bin 32
+gcloud kms encrypt \
+  --location=<REGION> --keyring=token-migration-v111 --key=pan-deidentify \
+  --plaintext-file=/tmp/aes_key.bin --ciphertext-file=/tmp/aes_key.wrapped
+gcloud secrets create dlp-wrapped-aes-key --data-file=/tmp/aes_key.wrapped
+shred -u /tmp/aes_key.bin /tmp/aes_key.wrapped   # never leave the unwrapped key on disk
+```
+
+**7.2. BigQuery dataset:**
+
+```bash
+bq mk --dataset --location=<REGION> <PROJECT_ID>:token_migration_reconciliation
+```
+
+**7.3. Pub/Sub topics** (dedicated to this dormant deployment; no
+publisher targets these until a merchant is onboarded):
+
+```bash
+gcloud pubsub topics create reference-vault-reconciled-v111
+gcloud pubsub topics create reference-reconciled-event-v111
+```
+
+**7.4. Dedicated dormant staging bucket** (distinct from the live and
+v1.1.0 buckets, per the same rationale as v1.1.0's own dedicated bucket --
+see [`README.md`'s Production version (v1.1.0) section](README.md#production-version-v110-blank-and-manual)):
+
+```bash
+gcloud storage buckets create gs://<BUCKET_NAME>-v111 --location=<REGION>
+```
+
+**7.5. Cloud Run functions:**
+
+```bash
+STAGE=$(mktemp -d)
+cp production-v1.1.1/staging_service.py production-v1.1.1/merchant_config.py \
+   production-v1.1.1/extraction_adapters.py production-v1.1.1/deidentify_adapters.py \
+   production-v1.1.1/store_adapters.py production-v1.1.1/sink_adapters.py \
+   production-v1.1.1/vault_reconciliation_adapters.py production-v1.1.1/requirements.txt "$STAGE/"
+cp -r production-v1.1.1/configs "$STAGE/"
+{
+  echo 'from staging_service import on_raw_uploaded, on_vault_reconciliation, on_reconciled_event  # noqa: F401'
+} > "$STAGE/main.py"
+
+gcloud functions deploy staging-on-raw-upload-v111 \
+  --gen2 --runtime=python312 --region=<REGION> \
+  --source="$STAGE" --entry-point=on_raw_uploaded \
+  --trigger-bucket=<BUCKET_NAME>-v111 \
+  --set-env-vars=GCP_PROJECT=<PROJECT_ID> \
+  --set-secrets=DLP_WRAPPED_AES_KEY=dlp-wrapped-aes-key:latest \
+  --memory=512Mi --timeout=120s --min-instances=0 --max-instances=3
+
+gcloud functions deploy staging-on-vault-reconciliation-v111 \
+  --gen2 --runtime=python312 --region=<REGION> \
+  --source="$STAGE" --entry-point=on_vault_reconciliation \
+  --trigger-topic=reference-vault-reconciled-v111 \
+  --set-env-vars=GCP_PROJECT=<PROJECT_ID>,PUBSUB_RECONCILED_TOPIC=reference-reconciled-event-v111 \
+  --set-secrets=DLP_WRAPPED_AES_KEY=dlp-wrapped-aes-key:latest \
+  --memory=512Mi --timeout=120s --min-instances=0 --max-instances=3
+
+gcloud functions deploy staging-on-reconciled-event-v111 \
+  --gen2 --runtime=python312 --region=<REGION> \
+  --source="$STAGE" --entry-point=on_reconciled_event \
+  --trigger-topic=reference-reconciled-event-v111 \
+  --set-env-vars=GCP_PROJECT=<PROJECT_ID> \
+  --set-secrets=DIGITALOCEAN_TOKEN=<SECRET_NAME>:latest,DLP_WRAPPED_AES_KEY=dlp-wrapped-aes-key:latest \
+  --set-env-vars=<MERCHANT>_DO_CLUSTER_NAME=<DO_CLUSTER_NAME> \
+  --memory=512Mi --timeout=120s --min-instances=0 --max-instances=3
+```
+
+**Onboarding an actual merchant onto this pipeline** requires, in addition to
+introducing `production-v1.1.1/configs/<MERCHANT_ID>.json` (see
+`configs/reference.json` for the requisite schema): redeploying
+`staging-on-raw-upload-v111` with `--trigger-bucket` pointed at the merchant's
+real staging bucket (in place of the dormant `<BUCKET_NAME>-v111`), and
+provisioning the merchant's `reconciliation.vault_url` and
+`<MERCHANT>_VAULT_TOKEN` per `vault_reconciliation_adapters.py`. Confirm
+DESIGN.md's two-condition test is actually satisfied before doing so --
+neither redeployment is reversible at zero cost once real PAN data begins
+flowing through Dataflow/DLP/BigQuery.
+
+## 8. Manual and Local Execution Procedures
 
 ```bash
 # Live pipeline
@@ -255,17 +369,24 @@ GCS_BUCKET=<BUCKET_NAME> python load_to_firestore.py
 GCS_BUCKET=<BUCKET_NAME> python export_firestore_to_gcs.py
 python test_transform_local.py <RAW_CSV_PATH> <OUTPUT_CSV_PATH>   # no cloud resources needed
 
-# Production pipeline
-cd production
+# Production pipeline (v1.1.0)
+cd ../production-v1.1.0
 GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> RAW_BLOB_NAME="raw/<MERCHANT_ID>/<Month Year>.csv" \
   python staging_service.py transform
 GCS_BUCKET=<BUCKET_NAME> MERCHANT=<MERCHANT_ID> TRANSFORMED_BLOB_NAME="transformed/<MERCHANT_ID>/Transformed_<Month>_<Year>.csv" \
   python staging_service.py reconcile
 
 PRODUCTION_TEST_BUCKET=<TEST_BUCKET_NAME> python test_staging_service.py   # requires live GCP data, see the script's docstring
+
+# Production pipeline (v1.1.1) -- transform only; reconcile/sync are Pub/Sub-triggered
+# exclusively (see staging_service.py's on_vault_reconciliation/on_reconciled_event)
+cd ../production-v1.1.1
+GCS_BUCKET=<BUCKET_NAME>-v111 GCP_PROJECT=<PROJECT_ID> MERCHANT=reference \
+  DLP_WRAPPED_AES_KEY=<BASE64_WRAPPED_KEY> RAW_BLOB_NAME="raw/reference/<Month Year>.csv" \
+  python staging_service.py transform
 ```
 
-## 8. Diagnostic Command Reference
+## 9. Diagnostic Command Reference
 
 ```bash
 # List deployed functions and their trigger type

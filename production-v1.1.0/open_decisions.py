@@ -48,7 +48,7 @@ OPEN_DECISIONS: list[dict] = [
             "differing column names, a differing Expiry date format, a differing repair "
             "field length -- executed locally with no cloud dependency, demonstrating that "
             "the staging service generalizes beyond the reference merchant rather than "
-            "merely reproducing it. See production/test_staging_service.py. Still "
+            "merely reproducing it. See production-v1.1.0/test_staging_service.py. Still "
             "unresolved: whether a *production* deployment for a second, genuinely new "
             "merchant is provisioned with a dedicated bucket or a namespaced prefix within "
             "a shared bucket."
@@ -59,7 +59,7 @@ OPEN_DECISIONS: list[dict] = [
         "title": "DigitalOcean Kubernetes API credentials for Payreto",
         "status": "unresolved",
         "detail": (
-            "production/extraction_adapters.py and production/sink_adapters.py invoke the "
+            "production-v1.1.0/extraction_adapters.py and production-v1.1.0/sink_adapters.py invoke the "
             "DigitalOcean Kubernetes API directly (see _extract_via_cloud_run_puller() and "
             "_sync_to_digitalocean_kubernetes()); each requires <MERCHANT>_SOURCE_TOKEN, "
             "<MERCHANT>_SOURCE_CLUSTER, DIGITALOCEAN_TOKEN, and <MERCHANT>_DO_CLUSTER_NAME "

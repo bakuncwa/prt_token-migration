@@ -1,5 +1,5 @@
 """Cloud Function (Generation 2): mirrors newly uploaded raw CSVs from
-the live pipeline's bucket into the production pipeline's dedicated
+the live pipeline's bucket into production-v1.1.0's dedicated
 bucket, merchant-namespaced under raw/<PRODUCTION_MERCHANT>/.
 
 Trigger: google.cloud.storage.object.v1.finalized on the live bucket.
@@ -7,20 +7,22 @@ Entry point: on_raw_uploaded_replicate
 
 This exists so that the reference merchant (configs/pilot.json, ported
 one-to-one from this same live pipeline) continues to exercise
-production/'s generalized staging_service.py against authentic data,
+production-v1.1.0/'s generalized staging_service.py against authentic data,
 without requiring raw/<merchant>/ objects to ever be written into the
-live bucket itself -- production/staging_service.py:on_raw_uploaded
+live bucket itself -- production-v1.1.0/staging_service.py:on_raw_uploaded
 expects a merchant subfolder that the live bucket's flat raw/ layout
 does not, and cannot safely, provide (the live bucket's own
 transform-on-raw-upload is triggered bucket-wide on any raw/ upload,
-irrespective of subfolder).
+irrespective of subfolder). production-v1.1.1/ has no equivalent replication
+step: it has no onboarded merchant to replicate real data toward (see
+production-v1.1.1/DESIGN.md's "Deployment status").
 
 Deployment (Generation 2, executed from the repository root). The Python
 Cloud Functions buildpack requires the entry-point file to be named
 `main.py` at the source root; since this module has no local
 dependency on the rest of live/, a minimal staging directory re-exporting
 its single entry point is sufficient, following the identical pattern
-production/'s SETUP.md step employs for staging_service.py:
+production-v1.1.0/'s SETUP.md step employs for staging_service.py:
   STAGE=$(mktemp -d)
   cp live/replicate_raw_to_production.py live/requirements.txt "$STAGE/"
   echo 'from replicate_raw_to_production import on_raw_uploaded_replicate  # noqa: F401' \\
