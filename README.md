@@ -307,22 +307,20 @@ protecting the PAN cryptographically instead of avoiding storing it,
 following Google Cloud's reference architecture for de-identification and
 re-identification of PII using Cloud DLP[^dlp-arch]:
 
-![De-identification and re-identification pipeline diagram](PII-DPL-Dataflow_ETL.png)
-
 ```
-DigitalOcean MIT DB --{GET, Dataflow}--> GCS raw/ (DLP-tokenized PAN, KMS-wrapped key)
-                                                  |
-                                                  v
-                                      transformed/ + BigQuery (queryable, still tokenized)
-                                                  |
-                        Token vault API supplies new PAN token automatically (no human)
-                                                  |
-                                                  v
-                              BigQuery reconciled table --Pub/Sub--> re-identify (KMS decrypt,
-                                                                       write-back path only)
-                                                  |
-                                                  v
-                                    DigitalOcean MIT DB <--{POST}--
+DigitalOcean MIT DB --{GET, Dataflow}--> GCS raw/ (PAN, DLP-tokenized via KMS key)
+                                                              |
+                                                              v
+                                         transformed/ --load--> BigQuery (queryable, tokenized)
+                                                              |
+                                                              v
+                                Token vault API supplies new PAN token automatically
+                                                              |
+                                                              v
+                                     BigQuery reconciled table --Pub/Sub--> re-identify (KMS)
+                                                              |
+                                                              v
+                                              DigitalOcean MIT DB <--{POST}--
 ```
 
 **When this directory applies, and when it does not:** see
