@@ -1,7 +1,7 @@
 # Card Token Migration Pipeline for PCI DSS-Compliant MIT Data & Reconciliation
 
 This repository documents a Payment Card Industry Data Security Standard
-(PCI DSS)[^pci]-scoped Extract, Transform, Load (ETL) pipeline engineered to
+(PCI DSS)¹-scoped Extract, Transform, Load (ETL) pipeline engineered to
 effect the migration of card-on-file data from a DigitalOcean-hosted Merchant
 Initiated Transaction (MIT) database to a newly provisioned token vault. The
 architecture employs Google Cloud Storage as an intermediate staging layer and
@@ -234,7 +234,7 @@ retrieved the underlying data.
 | Extraction | scheduled Cloud Run puller | Dataflow (for merchants whose data volume necessitates it) |
 | Mapping authorship | Gemini agent proposes `configs/<merchant>.json` from representative sample data, subject to human approval | -- |
 | Reconciliation store | Firestore, one field per document | -- |
-| Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto[^payreto] | any merchant-specific target system |
+| Sink | pluggable adapter, for example DigitalOcean Kubernetes for Payreto² | any merchant-specific target system |
 
 The complete rationale underlying each default is documented in
 [`production-v1.1.0/DESIGN.md`](production-v1.1.0/DESIGN.md).
@@ -305,7 +305,9 @@ exposure to, and BigQuery, unlike Firestore's single-field document, is
 inherently a queryable store. This directory answers that requirement by
 protecting the PAN cryptographically instead of avoiding storing it,
 following Google Cloud's reference architecture for de-identification and
-re-identification of PII using Cloud DLP[^dlp-arch]:
+re-identification of PII using Cloud DLP³:
+
+![De-identification/re-identification Token Migration ETL diagram](De-identification%20Re-identification%20Token%20Migration%20ETL.svg)
 
 ```
 DigitalOcean MIT DB --{GET, Dataflow}--> GCS raw/ (PAN, DLP-tokenized via KMS key)
@@ -457,15 +459,14 @@ Sources: [Cloud Run pricing](https://cloud.google.com/run/pricing),
 
 ## References
 
-[^pci]: PCI Security Standards Council, *Payment Card Industry Data Security
-    Standard*, v4.0.1. https://www.pcisecuritystandards.org/standards/pci-dss/.
-
-[^payreto]: Payreto Services Inc., payment service provider and financial
-    outsourcing operator. https://www.payreto.com/about-us/.
-
-[^dlp-arch]: Google Cloud, *De-identification and re-identification of PII in
-    large-scale datasets using Cloud DLP*.
-    https://docs.cloud.google.com/architecture/de-identification-re-identification-pii-using-cloud-dlp.
-    `production-v1.1.1/` adapts this reference architecture to the card
-    token migration domain; see `production-v1.1.1/DESIGN.md` for the
-    adaptation's rationale and the two-condition test gating its adoption.
+1. PCI Security Standards Council. (2024). *Payment Card Industry Data
+   Security Standard* (Version 4.0.1).
+   https://www.pcisecuritystandards.org/standards/pci-dss/.
+2. Payreto Services Inc. (n.d.). *About us*.
+   https://www.payreto.com/about-us/.
+3. Google Cloud. (n.d.). *De-identification and re-identification of PII in
+   large-scale datasets using Cloud DLP*.
+   https://docs.cloud.google.com/architecture/de-identification-re-identification-pii-using-cloud-dlp.
+   `production-v1.1.1/` adapts this reference architecture to the card token
+   migration domain; see `production-v1.1.1/DESIGN.md` for the adaptation's
+   rationale and the two-condition test gating its adoption.
