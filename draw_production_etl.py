@@ -17,7 +17,7 @@ OUT = Path(__file__).resolve().parent / "Production Token Migration ETL.png"
 W, H = 19.81, 11.87
 LW = 2.0
 FONT = "DejaVu Sans"
-TEAL, TEAL_FILL = "#0f7f86", "#E8F4F4"
+TEAL, TEAL_FILL = "black", "white"
 
 fig = plt.figure(figsize=(W, H), dpi=150)
 ax = fig.add_axes([0, 0, 1, 1])
@@ -56,8 +56,7 @@ def para(cx, cy, w, h, label, size=12.5, s=0.6):
 
 
 def note(x, y, w, h, label, size=11):
-    ax.add_patch(Rectangle((x + 0.05, y - 0.05), w, h, facecolor="#E6E6E6", edgecolor="none", zorder=2))
-    ax.add_patch(Rectangle((x, y), w, h, facecolor="#FDDC82", edgecolor="#C9A227", lw=1.2, zorder=3))
+    ax.add_patch(Rectangle((x, y), w, h, facecolor="white", edgecolor="black", lw=1.4, zorder=3))
     text(x + w / 2, y + h / 2, label, size=size)
 
 
@@ -80,7 +79,7 @@ ax.add_patch(FancyBboxPatch((0.4, 0.5), 19.02, 10.52, boxstyle="round,pad=0,roun
 ax.add_patch(FancyBboxPatch((0.55, 10.26), 4.6, 0.88, boxstyle="round,pad=0,rounding_size=0.1",
                             facecolor="black", edgecolor="black", zorder=2))
 text(0.77, 10.70, "Production Token Migration ETL", size=16, weight="bold", color="white", ha="left")
-text(0.58, 10.06, "any merchant, config-driven", size=12.5, style="italic", color="#555555", ha="left")
+text(0.58, 10.06, "any merchant, config-driven", size=12.5, style="italic", color="black", ha="left")
 
 # extraction row
 y1 = 8.43
@@ -129,7 +128,7 @@ for i, row in enumerate(rows):
     y = top - rh * (i + 1)
     x = tx
     for j, val in enumerate(row):
-        ax.add_patch(Rectangle((x, y), cw[j], rh, facecolor="#EEEEEE" if i == 0 else "white", edgecolor="black",
+        ax.add_patch(Rectangle((x, y), cw[j], rh, facecolor="white", edgecolor="black",
                                lw=1.5 if i == 0 else 1.0, zorder=3))
         text(x + 0.18, y + rh / 2, val, size=10, weight="bold" if i == 0 else "normal", ha="left")
         x += cw[j]
