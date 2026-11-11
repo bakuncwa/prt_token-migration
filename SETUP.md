@@ -413,3 +413,44 @@ gcloud projects get-iam-policy <PROJECT_ID> \
   --filter="bindings.members:<SERVICE_ACCOUNT_EMAIL>" \
   --format="table(bindings.role)"
 ```
+
+## 10. CI/CD: Cloud Build
+
+[`cloudbuild.yaml`](cloudbuild.yaml) defines the production pipeline's
+continuous integration and delivery. On every push to `main`, Cloud Build:
+
+1. **Tests:** installs `production-v1.1.0/requirements.txt` on Python 3.12 and
+   runs verification procedure 2 of `test_staging_service.py` (the synthetic
+   `samplepay` merchant, offline, no credentials). A failing assertion stops
+   the build before anything is deployed.
+2. **Deploys:** stages the deployment directory described in Section 6 and
+   redeploys `staging-on-raw-upload`, `staging-on-firestore-write` and
+   `staging-on-cleaned-upload`. Settings not named in the build, such as the
+   `DIGITALOCEAN_TOKEN` secret and the `<MERCHANT>_DO_CLUSTER_NAME` variables,
+   are kept from the existing deployment.
+
+Verification procedures 1, 3 and 4 read authentic reference-merchant data and
+remain manual (Section 8).
+
+One-time trigger setup, after connecting the GitHub repository to Cloud Build
+in the Console (Cloud Build > Triggers > Connect repository):
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe cardcorp-token-migration --format='value(projectNumber)')
+for ROLE in roles/cloudfunctions.developer roles/run.admin roles/iam.serviceAccountUser; do
+  gcloud projects add-iam-policy-binding cardcorp-token-migration \
+    --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" --role="$ROLE"
+done
+
+gcloud builds triggers create github \
+  --name=token-migration-main --repo-owner=bakuncwa --repo-name=prt_token-migration \
+  --branch-pattern='^main$' --build-config=cloudbuild.yaml \
+  --substitutions=_BUCKET=<BUCKET_NAME>,_REGION=<REGION> \
+  --project=cardcorp-token-migration
+```
+
+A build can also be run by hand, without a push:
+
+```bash
+gcloud builds submit --config=cloudbuild.yaml --substitutions=_BUCKET=<BUCKET_NAME> --project=cardcorp-token-migration .
+```

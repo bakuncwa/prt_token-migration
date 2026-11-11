@@ -1,0 +1,53 @@
+# Cloud Build CI/CD for the production pipeline (production-v1.1.0/).
+# A trigger on pushes to main runs this file: the offline staging-service
+# test gates the build, then the three Cloud Run functions are redeployed.
+# Set _BUCKET (and _REGION if not europe-west2) on the trigger; see
+# SETUP.md, Section 10.
+substitutions:
+  _REGION: europe-west2
+  _BUCKET: ''
+
+steps:
+  - id: test
+    name: python:3.12-slim
+    dir: production-v1.1.0
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install --quiet -r requirements.txt
+        python -c "import test_staging_service as t; t.test_transform_for_different_schema()"
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: [test]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        test -n "${_BUCKET}" || { echo "Set the _BUCKET substitution on the trigger"; exit 1; }
+        STAGE=$$(mktemp -d)
+        cp production-v1.1.0/staging_service.py production-v1.1.0/merchant_config.py \
+           production-v1.1.0/store_adapters.py production-v1.1.0/sink_adapters.py \
+           production-v1.1.0/requirements.txt "$$STAGE/"
+        cp -r production-v1.1.0/configs "$$STAGE/"
+        printf '%s\n' \
+          'from staging_service import on_raw_uploaded, on_firestore_write  # noqa: F401' \
+          'from sink_adapters import on_cleaned_uploaded  # noqa: F401' > "$$STAGE/main.py"
+        COMMON="--gen2 --runtime=python312 --region=${_REGION} --source=$$STAGE --memory=256Mi --timeout=60s --min-instances=0 --max-instances=3 --project=$PROJECT_ID --quiet"
+        gcloud functions deploy staging-on-raw-upload $$COMMON \
+          --entry-point=on_raw_uploaded --trigger-bucket=${_BUCKET}
+        gcloud functions deploy staging-on-firestore-write $$COMMON \
+          --entry-point=on_firestore_write \
+          --trigger-event-filters="type=google.cloud.firestore.document.v1.written" \
+          --trigger-event-filters="database=(default)" \
+          --trigger-event-filters-path-pattern="document={collection}/{docId}" \
+          --trigger-location=${_REGION} \
+          --update-env-vars=GCS_BUCKET=${_BUCKET},FIRESTORE_DATABASE="(default)"
+        gcloud functions deploy staging-on-cleaned-upload $$COMMON \
+          --entry-point=on_cleaned_uploaded --trigger-bucket=${_BUCKET}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s
