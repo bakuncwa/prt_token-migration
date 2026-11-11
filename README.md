@@ -56,7 +56,7 @@ Account Number (PAN).
 | Source / sink system | DigitalOcean Kubernetes API | The DigitalOcean-hosted Merchant Initiated Transaction (MIT) database, both read (extraction) and written (post-reconciliation synchronization) |
 | Extraction (optional, high-volume) | Google Cloud Dataflow (Apache Beam) | Pluggable `extraction_adapters.py` adapter, selected per merchant in place of the default scheduled Cloud Run puller; the expected default for any merchant genuinely onboarded onto `production-v1.1.1/` |
 | Mapping-config authoring | Google Gemini API | `production-v1.1.0/gemini_mapping_agent.py` proposes `configs/<merchant>.json` from representative sample data, subject to human review |
-| CI/CD | Google Cloud Build | Automated deployment of Cloud Run functions on push, within the free build-minutes tier |
+| CI/CD | Google Cloud Build | [`cloudbuild.yaml`](cloudbuild.yaml): on every push to `main`, runs the offline staging-service test, then redeploys the production Cloud Run functions, within the free build-minutes tier |
 | Language / runtime | Python 3.12, pandas, Functions Framework | Shared implementation language across every stage of the live and both production pipelines |
 | Tooling | Cloud Shell, `gcloud` CLI, `doctl`, `kubectl` | Deployment, diagnostics, and DigitalOcean Kubernetes cluster operations (see [`SETUP.md`](SETUP.md)) |
 
@@ -388,7 +388,7 @@ the baseline for estimation, in preference to an assumed or hypothetical volume.
 | Reconciliation store | \$0.00 -- 2,275 documents (tens of kilobytes) evaluated against a daily free tier of 1 GiB stored, 50,000 reads, 20,000 writes, and 20,000 deletes | \$0.00 at a comparable per-merchant volume -- an estimated 20 or more merchants could each execute a complete dataset re-read on a single day prior to the shared daily read quota being exhausted | Equivalent to the default path |
 | Extraction | included above | included above | + Dataflow: no free tier applies. A single small worker (1 vCPU, 3.75 GiB) executing a 10-minute monthly batch operation incurs approximately \$0.056 per vCPU-hour x 0.167 hour, plus \$0.003557 per GiB-hour x 3.75 GiB x 0.167 hour, yielding approximately \$0.01-\$0.02 per execution -- the compute expenditure itself is negligible; the material expenditure arises from operating a second execution substrate at all |
 | Mapping authorship | manual; developer time exclusively | Gemini agent, flash-tier pricing (\$0.30 per 1M input tokens, \$2.50 per 1M output tokens): a single onboarding invocation of approximately 5,000 input and 1,000 output tokens incurs a cost of approximately \$0.004, executed once per merchant onboarding event | Equivalent |
-| CI/CD | manual `gcloud functions deploy` invocation | Cloud Build, within the 120 free build-minutes per day (e2-standard-2) at the present deployment frequency | Equivalent |
+| CI/CD | manual `gcloud functions deploy` invocation | Cloud Build (`cloudbuild.yaml`), within the 120 free build-minutes per day (e2-standard-2) at the present deployment frequency | Equivalent |
 | Storage (GCS) | approximately \$0.002 per month (substantially under 100 MB, at \$0.020 per GB per month) | scales linearly with merchant count, at the equivalent per-merchant rate | Equivalent |
 | **Estimated monthly total** | **approximately \$0.00** | **approximately \$0.00 per merchant**, until dozens of merchants have been onboarded | **approximately \$0.00 per merchant**, plus several cents per merchant per month for Dataflow |
 
